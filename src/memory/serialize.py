@@ -9,7 +9,10 @@ from typing import Any
 
 import numpy as np
 
-Vector = np.ndarray[Any, np.dtype[np.float32]]
+# Любой float-вектор: float32, float64 и т.д.
+# (serialize_embedding даункастит в float32 на входе,
+#  deserialize_embedding возвращает float32 — подтип floating[Any])
+Vector = np.ndarray[Any, np.dtype[np.floating[Any]]]
 
 
 def serialize_embedding(embedding: Vector) -> bytes:
