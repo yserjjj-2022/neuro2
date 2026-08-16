@@ -30,6 +30,15 @@ def test_compute_shape_mismatch(calc: FreeEnergyCalculator) -> None:
         calc.compute(error, precision, prev_f=0.0, prev_stress=0.0)
 
 
+def test_compute_empty_vs_nonempty_shape_mismatch(calc: FreeEnergyCalculator) -> None:
+    """ValueError когда один массив пустой, другой — нет."""
+    error = np.array([])
+    precision = np.array([0.5, 0.8])
+
+    with pytest.raises(ValueError):
+        calc.compute(error, precision, prev_f=0.0, prev_stress=0.0)
+
+
 def test_compute_empty_arrays(calc: FreeEnergyCalculator) -> None:
     """F(t) = 0.0 для пустых векторов."""
     error = np.array([])
