@@ -19,6 +19,8 @@ F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
 **Пограничные случаи:**
 - Если `prediction_error.shape != precision.shape` → `ValueError`
 - Если векторы пустые (0 колонок) → `F(t) = 0.0`
+- Если `precision` пустой → `gamma = gamma_base`
+- Если `precision <= 0` → `np.clip(precision, 1e-6, None)` (молчаливый клиппинг)
 
 ### FreeEnergyResult (dataclass)
 
@@ -30,7 +32,6 @@ class FreeEnergyResult:
     valence: float              # Валентность -dF/dt
     allostatic_stress: float    # Интеграл F(t) по времени (затухающий)
     gamma: float                # Precision weighting γ
-    would_trigger: bool | None  # При f_threshold=None — None (shadow mode)
 ```
 
 ### FreeEnergyCalculator (fully stateless)
@@ -78,7 +79,7 @@ class FreeEnergyCalculator:
             prev_stress: Значение allostatic_stress(t-1).
             
         Returns:
-            FreeEnergyResult с полями: f, valence, stress, gamma, would_trigger=None.
+            FreeEnergyResult с полями: f, valence, stress, gamma.
             
         Raises:
             ValueError: Если prediction_error.shape != precision.shape.
@@ -87,7 +88,12 @@ class FreeEnergyCalculator:
             F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
             valence = -(F(t) - prev_f) / dt
             stress = prev_stress * stress_decay + F(t)
-            gamma = np.mean(precision)
+            gamma = np.mean(precision) if len(precision) > 0 else gamma_base
+            
+        Note:
+            gamma = mean(precision) — простейшая агрегация для Фазы 1.
+            Пересмотр (min, geometric mean) — Фаза 2.
+            precision <= 0 клиппится до 1e-6.
         """
         ...
     
@@ -133,8 +139,6 @@ class EnergyObserver:
             
         Returns:
             FreeEnergyResult — сырые метрики без принятия решений.
-            Поле would_trigger устанавливается в True/False в зависимости
-            от порога, но не вызывает действий.
         """
         ...
 ```
@@ -144,8 +148,8 @@ class EnergyObserver:
 1. **F(t) ≥ 0**: свободная энергия всегда неотрицательная (KL-дивергенция, квадратичная форма).
 2. **Valence = -dF/dt**: валентность — производная F(t) со знаком минус.
 3. **Stress монотонно затухает**: если F(t) = 0, stress не растёт (stress_decay < 1).
-4. **γ > 0**: precision weighting всегда положительное.
-5. **Non-blocking**: `compute()` не должен выполняться дольше 1 мс на батче ≤100 колонок.
+4. **γ > 0**: precision weighting всегда положительное (clip до 1e-6 при <= 0).
+5. **Non-blocking**: `compute()` выполняется быстро (< 10 мс на батче ≤1000 колонок).
 6. **Fully stateless**: `FreeEnergyCalculator.compute()` не изменяет внутреннее состояние. Все временные переменные (prev_f, prev_stress) передаются явно.
 7. **Shape validation**: `ValueError` при несовпадении размерностей prediction_error и precision.
 
@@ -155,11 +159,13 @@ class EnergyObserver:
 - [ ] Формула F(t) = 0.5 · Σ γᵢ · e(t)ᵢ² реализована верно
 - [ ] `ValueError` при несовпадении размерностей prediction_error и precision
 - [ ] Пустые векторы → F(t) = 0.0
+- [ ] Пустой precision → gamma = gamma_base
+- [ ] precision <= 0 → клиппится до 1e-6 (не nan, не inf)
 - [ ] `valence` корректно рассчитывается как `-(f - prev_f) / dt`
 - [ ] `allostatic_stress` монотонно затухает при F(t) = 0
 - [ ] `gamma` всегда > 0
 - [ ] `EnergyObserver` тестируется без файловой системы (sink=list.append)
-- [ ] Минимум 4 unit-теста: F(t) formula, shape validation, stress decay, valence sign
+- [ ] Минимум 5 unit-теста: F(t) formula, shape validation, empty arrays, stress decay, valence sign
 - [ ] `ruff check` и `ruff format` проходят без ошибок
 - [ ] mypy strict не ругается
 
@@ -180,4 +186,4 @@ class EnergyObserver:
 | Формула stress decay | Решено | `stress = prev_stress * stress_decay + F(t)` (затухающий интеграл) |
 | Инициализация F(0), stress(0) | Решено | `F(0) = 0`, `stress(0) = 0` (система начинается с нуля) |
 | Batch size для SIMD | Отложен | Фаза 3: батчинг колонок, пока одна колонка |
-| would_trigger в результате | Решено | `would_trigger: bool | None` — None в shadow mode, True/False при указании порога |
+| gamma агрегация | Решено | `mean(precision)` — простейшая для Фазы 1. `min` или `geometric mean` — Фаза 2 |
