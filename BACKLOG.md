@@ -19,11 +19,11 @@
 | [Phase1][energy] Task 6 | Обновить __init__.py | Re-export FreeEnergyResult, FreeEnergyCalculator, EnergyObserver | P0 | 2025-01-16 |
 | [Phase2][tech-debt] Task 1 | Добавить Purity Test для Calculator | Прямой тест архитектурного свойства: одинаковый вход → одинаковый выход, порядок не важен | P2 | 2025-01-16 |
 | [Phase2][tech-debt] Task 2 | Восстановление состояния Observer при перезапуске | Интеграция с memory для загрузки prev_f/prev_stress из последнего эпизода | P2 | 2025-01-16 |
-| [Phase1][telemetry] Task 1 | Реализовать models.py: TelemetryEvent | Создать frozen dataclass с полями timestamp, free_energy, valence, stress, active_columns (без phase/mode/would_trigger) | P0 | 2025-01-16 |
+| [Phase1][telemetry] Task 1 | Реализовать models.py: TelemetryEvent | Создать frozen dataclass с полями timestamp, free_energy, valence, stress, active_columns, phase, mode | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 2 | Реализовать serialize.py: serialize_event | Чистое ядро: json.dumps(allow_nan=False), без I/O | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 3 | Реализовать tests/test_telemetry_serialize.py | 2 unit-теста: valid event, NaN raises ValueError | P0 | 2025-01-16 |
-| [Phase1][telemetry] Task 4 | Реализовать writer.py: TelemetryWriter | Shell: делегирует serialize_event, управляет файлом | P0 | 2025-01-16 |
+| [Phase1][telemetry] Task 4 | Реализовать writer.py: TelemetryWriter | Shell: делегирует serialize_event, flush после каждой записи | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 5 | Реализовать tests/test_telemetry_writer.py | 2 unit-теста: file creation, JSONL format | P0 | 2025-01-16 |
-| [Phase1][telemetry] Task 6 | Реализовать logger.py: TelemetryLogger + SupportsWrite | Shell с DI через Protocol, phase/mode в __init__ | P0 | 2025-01-16 |
-| [Phase1][telemetry] Task 7 | Реализовать tests/test_telemetry_logger.py | 1 unit-тест: logger с mock writer | P0 | 2025-01-16 |
+| [Phase1][telemetry] Task 6 | Реализовать logger.py: TelemetryLogger + SupportsWrite | Shell с DI через Protocol, phase/mode в __init__, crash-safety | P0 | 2025-01-16 |
+| [Phase1][telemetry] Task 7 | Реализовать tests/test_telemetry_logger.py | 2 unit-теста: mock writer, swallows errors | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 8 | Обновить __init__.py | Re-export TelemetryEvent, serialize_event, TelemetryWriter, TelemetryLogger | P0 | 2025-01-16 |
