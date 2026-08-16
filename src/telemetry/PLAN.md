@@ -3,67 +3,87 @@
 ## Файлы для создания/изменения
 
 1. `src/telemetry/models.py` — `TelemetryEvent` dataclass
-2. `src/telemetry/writer.py` — `TelemetryWriter` (pure logic)
-3. `src/telemetry/logger.py` — `TelemetryLogger` (shell + DI)
-4. `src/telemetry/__init__.py` — Re-exports (обновить)
-5. `src/tests/test_telemetry_writer.py` — Unit-тесты для writer
-6. `src/tests/test_telemetry_logger.py` — Unit-тесты для logger
+2. `src/telemetry/serialize.py` — `serialize_event()` (чистое ядро)
+3. `src/telemetry/writer.py` — `TelemetryWriter` (shell + I/O)
+4. `src/telemetry/logger.py` — `TelemetryLogger` (DI через Protocol)
+5. `src/telemetry/__init__.py` — Re-exports (обновить)
+6. `src/tests/test_telemetry_serialize.py` — Unit-тесты для serialize_event
+7. `src/tests/test_telemetry_writer.py` — Unit-тесты для writer
+8. `src/tests/test_telemetry_logger.py` — Unit-тесты для logger
 
 ## Зависимости
 
 **Внешние:**
-- `json` — стандартная библиотека для JSONL
+- Нет
 
 **Стандартная библиотека:**
 - `dataclasses` — frozen dataclass для события
-- `typing` — Optional, Callable
+- `typing` — Protocol для duck typing
 - `pathlib` — Path для log_path
 - `time` — time.time() для timestamp
+- `json` — json.dumps для сериализации
 
 ## Порядок реализации
 
 ### 1. Models (`models.py`)
 - Создать `@dataclass(frozen=True) TelemetryEvent`
-- Поля: `timestamp`, `free_energy`, `valence`, `allostatic_stress`, `active_columns`, `phase`, `mode`
+- Поля: `timestamp`, `free_energy`, `valence`, `allostatic_stress`, `active_columns`
+- Без `phase` и `mode` (задаются в TelemetryLogger)
 - Без `would_trigger` (отложен до Фазы 2)
 
-### 2. Writer (`writer.py`)
+### 2. Serialize (`serialize.py`) — Functional Core
+- Создать `serialize_event(event: TelemetryEvent) -> str`
+- Использовать `json.dumps(dataclasses.asdict(event), allow_nan=False)`
+- Возвращает JSON-строку, без I/O
+- Raises `ValueError` при NaN/Infinity
+
+### 3. Тесты для Serialize (`src/tests/test_telemetry_serialize.py`)
+- `test_serialize_valid`: валидный event → корректная JSON-строка
+- `test_serialize_nan_raises`: NaN → ValueError
+
+### 4. Writer (`writer.py`) — Imperative Shell
 - Создать `TelemetryWriter`
 - `__init__`: `log_path: Path`
 - `write(event)`:
-  1. Сериализовать event в JSON через `dataclasses.asdict()`
-  2. Добавить timestamp (если не задан)
-  3. Записать одну JSONL-строку в файл
+  1. Вызывает `serialize_event(event)` для получения строки
+  2. Добавляет `\n`
+  3. Записывает в файл
 - `close()`: закрыть файл
 
-### 3. Тесты для Writer (`src/tests/test_telemetry_writer.py`)
+### 5. Тесты для Writer (`src/tests/test_telemetry_writer.py`)
 - `test_write_creates_file`: writer создаёт файл при первом вызове
 - `test_write_jsonl_format`: каждая строка — валидный JSON
-- `test_write_multiple_events`: несколько событий в одном файле
 
-### 4. Logger (`logger.py`)
+### 6. Logger (`logger.py`) — Shell с DI
+- Создать Protocol `SupportsWrite`
 - Создать `TelemetryLogger`
-- `__init__`: `writer: TelemetryWriter`
-- `log(event)`: вызывает `writer.write(event)`
+- `__init__`: `writer: SupportsWrite`, `phase: str`, `mode: str`
+- `log(free_energy, valence, stress, active_columns)`:
+  1. Создаёт `TelemetryEvent` с timestamp + phase + mode
+  2. Вызывает `writer.write(event)`
 
-### 5. Тесты для Logger (`src/tests/test_telemetry_logger.py`)
-- `test_logger_no_writer`: logger работает без writer (mock)
+### 7. Тесты для Logger (`src/tests/test_telemetry_logger.py`)
+- `test_logger_with_mock_writer`: logger с mock writer (проверяет вызов)
 
-### 6. `__init__.py`
-- Re-export: `TelemetryEvent`, `TelemetryWriter`, `TelemetryLogger`
+### 8. `__init__.py`
+- Re-export: `TelemetryEvent`, `serialize_event`, `TelemetryWriter`, `TelemetryLogger`
 
 ## План тестов
 
 | Тест | Покрытие | Инвариант |
 |------|----------|-----------|
+| `test_serialize_valid` | Сериализация | JSON-строка из event |
+| `test_serialize_nan_raises` | Валидация | ValueError при NaN |
 | `test_write_creates_file` | Создание файла | Запись не блокирует |
 | `test_write_jsonl_format` | JSONL формат | Одна строка = один JSON |
-| `test_write_multiple_events` | Несколько событий | Monotonic timestamps |
-| `test_logger_no_writer` | Logger без writer | Не блокирует |
+| `test_logger_with_mock_writer` | DI через Protocol | Не блокирует |
 
 ## Заметки для реализации
 
 - **JSONL формат**: одна строка = один JSON-объект, без пустых строк
-- **Timestamp**: `time.time()` в `write()`, если не задан в event
-- **Functional Core**: `TelemetryWriter.write()` — чистая функция, тестируется без файловой системы (через `tmp_path`)
+- **Timestamp**: `time.time()` в `logger.log()`, не в serialize_event
+- **Functional Core**: `serialize_event()` — чистая функция, тестируется без файловой системы
+- **Imperative Shell**: `TelemetryWriter` — единственное место I/O
+- **DI через Protocol**: `TelemetryLogger` зависит от `SupportsWrite`, не от конкретного `TelemetryWriter`
+- **phase/mode**: задаются в `TelemetryLogger.__init__`, подставляются автоматически
 - **Reference**: `FreeEnergyResult` из `src/core/energy/` — аналогичный frozen dataclass
