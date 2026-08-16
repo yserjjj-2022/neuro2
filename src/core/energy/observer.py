@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 
@@ -23,7 +23,7 @@ class EnergyObserver:
     def __init__(
         self,
         calculator: FreeEnergyCalculator,
-        sink: Optional[Callable[[FreeEnergyResult], None]] = None,
+        sink: Callable[[FreeEnergyResult], None] | None = None,
     ) -> None:
         self.calculator = calculator
         self.sink = sink

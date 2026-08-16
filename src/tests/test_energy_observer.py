@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from src.core.energy.calculator import FreeEnergyCalculator
-from src.core.energy.observer import EnergyObserver
 from src.core.energy.models import FreeEnergyResult
+from src.core.energy.observer import EnergyObserver
 
 
 @pytest.fixture
@@ -41,7 +41,6 @@ def test_observer_maintains_state(observer: EnergyObserver) -> None:
     precision1 = np.array([1.0])
 
     result1 = observer.observe(error1, precision1)
-    prev_f_after_1 = observer._prev_f
 
     error2 = np.array([1.0])
     precision2 = np.array([1.0])

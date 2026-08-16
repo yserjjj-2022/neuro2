@@ -9,7 +9,7 @@ import logging
 
 import pytest
 
-from src.telemetry.logger import SupportsWrite, TelemetryLogger
+from src.telemetry.logger import TelemetryLogger
 from src.telemetry.models import TelemetryEvent
 
 
@@ -66,7 +66,6 @@ def test_logger_swallows_writer_errors(
 ) -> None:
     """Logger не пробрасывает исключения от writer и логирует ошибку."""
     # Заставим writer бросить исключение
-    original_write = mock_writer.write
     call_count = {"n": 0}
 
     def failing_write(event: TelemetryEvent) -> None:

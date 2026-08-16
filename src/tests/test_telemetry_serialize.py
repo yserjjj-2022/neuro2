@@ -5,8 +5,6 @@ Pure function: input → JSON string, no I/O, no filesystem.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from src.telemetry.models import TelemetryEvent
