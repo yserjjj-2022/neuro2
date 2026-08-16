@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.392
+    hooks:
+      - id: pyright
+        name: pyright (src/core)
+        files: ^src/core/
+        args: [--strict]
+
+  - repo: https://github.com/pytest-dev/pytest
+    rev: 8.3.4
+    hooks:
+      - id: pytest
+        name: pytest (quick)
+        args: [-q, --tb=short]
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: check-added-large-files
+        name: Check for added large files
+        entry: bash -c 'for f in "$@"; do if [ "$(wc -c < "$f")" -gt 1048576 ]; then echo "Large file: $f"; exit 1; fi; done' --
+        language: system
+        files: \.(py|md|json|yaml|yml)$
+        exclude: ^uv\.lock$
