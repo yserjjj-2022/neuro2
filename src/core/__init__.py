@@ -1,13 +1,15 @@
+"""Core modules: CMC fabric, energy, voting.
+
+CMC (Canonical Microcircuits): L4 → L5/6 → L2/3 column dynamics.
+Functional Core / Imperative Shell (ADR-0004) across all core/* modules.
 """
-Canonical Microcircuits (CMC) Fabric
 
-Канонические колоночные микроконтуры:
-- L4: входной слой (сенсорные данные)
-- L5/6: генератор состояния x(t)
-- L2/3: ошибка предсказания e(t)
+from .cmc import CMCEnsemble, ColumnConfig, ColumnState, EnsembleOutput, column_step
 
-Параллельный батчинг колонок, O(N) масштабирование.
-"""
-from .cmc import Column
-
-__all__ = ["Column"]
+__all__ = [
+    "CMCEnsemble",
+    "ColumnConfig",
+    "ColumnState",
+    "EnsembleOutput",
+    "column_step",
+]
