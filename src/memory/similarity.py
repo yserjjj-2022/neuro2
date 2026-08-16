@@ -6,10 +6,14 @@ Used for tests and potential re-ranking of recall() results (Phase 2).
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
+Vector = np.ndarray[Any, np.dtype[np.float32]]
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+
+def cosine_similarity(a: Vector, b: Vector) -> float:
     """Косинусная схожесть двух векторов.
 
     Чистая функция: тестируется без SQLite, без файловой системы.

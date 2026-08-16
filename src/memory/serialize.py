@@ -5,10 +5,14 @@ Pure functions, no I/O. BLOB format: float32 little-endian, contiguous.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
+Vector = np.ndarray[Any, np.dtype[np.float32]]
 
-def serialize_embedding(embedding: np.ndarray) -> bytes:
+
+def serialize_embedding(embedding: Vector) -> bytes:
     """Сериализация эмбеддинга в BLOB для хранения в SQLite.
 
     Чистая функция: np.ndarray → bytes, без I/O.
@@ -26,7 +30,7 @@ def serialize_embedding(embedding: np.ndarray) -> bytes:
     return np.asarray(embedding, dtype=np.float32).tobytes()
 
 
-def deserialize_embedding(blob: bytes, dim: int) -> np.ndarray:
+def deserialize_embedding(blob: bytes, dim: int) -> Vector:
     """Десериализация BLOB из SQLite в np.ndarray.
 
     Чистая функция: bytes → np.ndarray, без I/O.
