@@ -187,3 +187,8 @@ class EnergyObserver:
 | Инициализация F(0), stress(0) | Решено | `F(0) = 0`, `stress(0) = 0` (система начинается с нуля) |
 | Batch size для SIMD | Отложен | Фаза 3: батчинг колонок, пока одна колонка |
 | gamma агрегация | Решено | `mean(precision)` — простейшая для Фазы 1. `min` или `geometric mean` — Фаза 2 |
+
+## Implementation Notes
+
+1. **Clip order**: `precision` must be clipped *before* calculating F(t) and gamma.
+2. **Debug logging**: Add `logger.debug("precision clipped")` when clipping occurs (for Phase 2 debugging).
