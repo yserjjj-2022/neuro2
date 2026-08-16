@@ -40,8 +40,8 @@ def test_compute_empty_arrays(calc: FreeEnergyCalculator) -> None:
 
 
 def test_compute_empty_precision(calc: FreeEnergyCalculator) -> None:
-    """gamma = gamma_base при пустом precision."""
-    error = np.array([1.0])
+    """gamma = gamma_base при пустых векторах."""
+    error = np.array([])
     precision = np.array([])
 
     result = calc.compute(error, precision, prev_f=0.0, prev_stress=0.0)
@@ -58,11 +58,11 @@ def test_compute_precision_clip(calc: FreeEnergyCalculator) -> None:
 
 
 def test_valence_sign(calc: FreeEnergyCalculator) -> None:
-    """Проверка знака valence при убывании F(t)."""
+    """Проверка знака valence при росте F(t)."""
     result1 = calc.compute(np.array([1.0]), np.array([1.0]), prev_f=0.0, prev_stress=0.0)
-    # F(t) упало с 2.5 до 2.0 -> valence положительный
+    # F(t) выросло с 0.5 до 2.0 -> valence отрицательный
     result2 = calc.compute(np.array([2.0]), np.array([1.0]), prev_f=result1.f, prev_stress=result1.allostatic_stress)
-    assert result2.valence > 0
+    assert result2.valence < 0
 
 
 def test_stress_decay(calc: FreeEnergyCalculator) -> None:

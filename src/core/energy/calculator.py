@@ -61,28 +61,34 @@ class FreeEnergyCalculator:
             Пересмотр (min, geometric mean) — Фаза 2.
             precision <= 0 клиппится до 1e-6.
         """
-        # 1. Validate shapes (fail-fast)
+        # 1. Handle empty arrays first
+        if prediction_error.size == 0 or precision.size == 0:
+            return FreeEnergyResult(
+                f=0.0,
+                valence=-(0.0 - prev_f) / self.dt,
+                allostatic_stress=prev_stress * self.stress_decay,
+                gamma=self.gamma_base,
+            )
+
+        # 2. Validate shapes (fail-fast)
         if prediction_error.shape != precision.shape:
             raise ValueError(
                 f"Shape mismatch: prediction_error {prediction_error.shape} "
                 f"!= precision {precision.shape}"
             )
 
-        # 2. Clip precision (silent clip for Phase 1)
+        # 3. Clip precision (silent clip for Phase 1)
         if np.any(precision <= 0):
             logger.debug("precision clipped")
             precision = np.clip(precision, 1e-6, None)
 
-        # 3. Compute F(t)
-        if prediction_error.size == 0:
-            f: float = 0.0
-        else:
-            f = 0.5 * np.sum(precision * prediction_error**2)
+        # 4. Compute F(t)
+        f = 0.5 * np.sum(precision * prediction_error**2)
 
-        # 4. Compute valence, stress, gamma
+        # 5. Compute valence, stress, gamma
         valence = -(f - prev_f) / self.dt
         stress = prev_stress * self.stress_decay + f
-        gamma = np.mean(precision) if precision.size > 0 else self.gamma_base
+        gamma = float(np.mean(precision))
 
         return FreeEnergyResult(
             f=f,
