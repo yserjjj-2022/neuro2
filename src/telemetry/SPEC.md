@@ -3,13 +3,19 @@
 ## Назначение
 Модуль логирования состояния хоста: непрерывная запись F(t), valence, allostatic stress и метаданных в JSONL-формат для последующего анализа и калибровки порогов.
 
+См. также `FreeEnergyResult` из `src/core/energy/` — аналогичный frozen dataclass для сериализации.
+
 ## Публичный интерфейс
 
 ### TelemetryEvent (dataclass)
+
 ```python
 @dataclass(frozen=True)
 class TelemetryEvent:
-    """Событие телеметрии — плоская структура, сериализуемая в JSON."""
+    """Событие телеметрии — плоская структура, сериализуемая в JSON.
+    
+    Аналог FreeEnergyResult из src/core/energy/, но для логирования.
+    """
     timestamp: float                  # Unix timestamp (time.time())
     free_energy: float                # Сырое значение F(t)
     valence: float                    # Валентность (-dF/dt)
@@ -20,9 +26,14 @@ class TelemetryEvent:
 ```
 
 ### TelemetryWriter
+
 ```python
 class TelemetryWriter:
-    """Запись TelemetryEvent в JSONL-файл."""
+    """Запись TelemetryEvent в JSONL-файл.
+    
+    Functional Core: write() — чистая функция (без состояния).
+    Imperative Shell: path хранится в __init__.
+    """
     
     def __init__(self, log_path: Path) -> None:
         """Инициализация writer.
@@ -33,7 +44,7 @@ class TelemetryWriter:
         ...
     
     def write(self, event: TelemetryEvent) -> None:
-        """Записать одно событие.
+        """Записать одно событие в JSONL.
         
         Args:
             event: Событие телеметрии для записи.
@@ -45,38 +56,34 @@ class TelemetryWriter:
         ...
 ```
 
-### TelemetryObserver (shadow mode)
+### TelemetryLogger (DI через sink)
+
 ```python
-class TelemetryObserver:
+class TelemetryLogger:
     """Shadow-наблюдатель: логирует F(t) без принятия решений.
     
-    Работает в Фазе 1 в режиме "shadow mode":
-    - Считает, где сработал бы порог
-    - Логирует, но ничего не вызывает
-    - Ничего не блокирует
+    Соответствует паттерну из energy:
+    - Core (TelemetryWriter) — чистая функция, тестируется без I/O
+    - Shell (TelemetryLogger) — инъекция writer, можно мокать в тестах
+    - В проде: writer = TelemetryWriter(Path("host.log"))
+    - В тестах: writer = MagicMock()
     """
     
     def __init__(
         self,
         writer: TelemetryWriter,
-        f_threshold: Optional[float] = None,
     ) -> None:
         """
         Args:
             writer: Writer для записи событий.
-            f_threshold: Порог F(t) для анализа (None = shadow mode, 
-                         только логирует без триггера).
         """
         ...
     
-    def observe(self, event: TelemetryEvent) -> None:
-        """Наблюдать за событием и логировать.
-        
-        В shadow mode (f_threshold=None): логирует всегда.
-        В calibrated mode: логирует и помечает, где бы сработал триггер.
+    def log(self, event: TelemetryEvent) -> None:
+        """Записать событие в лог.
         
         Args:
-            event: Событие для наблюдения.
+            event: Событие для логирования.
         """
         ...
 ```
@@ -88,14 +95,14 @@ class TelemetryObserver:
 3. **F(t) ≥ 0**: значение free_energy всегда неотрицательное.
 4. **Monotonic timestamps**: `timestamp` каждого следующего события ≥ предыдущего.
 5. **JSONL-формат**: одна строка = один JSON-объект. Пустые строки не допускаются.
+6. **Функциональное ядро**: `TelemetryWriter.write()` — чистая функция, тестируется без файловой системы (через mock).
 
 ## Критерии приёмки
 
 - [ ] `TelemetryEvent` — frozen dataclass, все поля типизированы
 - [ ] `TelemetryWriter.write()` сериализует event в JSONL и записывает в файл
-- [ ] `TelemetryObserver.observe()` логирует событие без блокировок
-- [ ] Shadow mode работает: `f_threshold=None` → логирует всё, не триггерит действий
-- [ ] Минимум 2 unit-теста: один для `TelemetryWriter`, один для `TelemetryObserver`
+- [ ] `TelemetryLogger` тестируется без файловой системы (mock writer)
+- [ ] Минимум 3 unit-теста: 2 для `TelemetryWriter`, 1 для `TelemetryLogger`
 - [ ] `ruff check` и `ruff format` проходят без ошибок
 - [ ] mypy strict для `src/telemetry/` не ругается
 
@@ -114,3 +121,4 @@ class TelemetryObserver:
 | Формат timestamp | Решено | Unix float (`time.time()`), UTC |
 | Rotation логов | Вне скоупа | Фаза 4+: active pruning старых записей |
 | Конфиденциальность | Вне скоупа | Фаза 3+: anonymization PII из логов |
+| `would_trigger` в логе | Отложен до Фазы 2 | Калибровка порога — Фаза 2 |
