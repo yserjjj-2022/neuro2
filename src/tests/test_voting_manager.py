@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.core.voting.kwta import VotingResult
 from src.core.voting.manager import VotingManager
+from src.core.voting.models import VotingResult
 
 
 def test_manager_default_k() -> None:
@@ -63,7 +63,7 @@ def test_manager_last_after() -> None:
     result = manager.vote(scores)
 
     assert manager.last is result
-    assert manager.last.indices[0] == 1
+    assert result.indices[0] == 1
 
 
 def test_manager_set_k() -> None:
