@@ -109,7 +109,8 @@ class EnergyObserver:
     Functional Core / Imperative Shell:
     - Core (calculator) — чистая функция, тестируется без I/O
     - Shell (observer) — инъекция sink, можно мокать в тестах
-    - В проде: sink = telemetry_logger.log_event
+    - В проде: sink=lambda r: telemetry_logger.log(r.f, r.valence, r.allostatic_stress)
+      (active_columns=0 по умолчанию до появления src/core/cmc/ в Фазе 3)
     - В тестах: sink = list.append
     """
     

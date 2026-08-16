@@ -62,7 +62,7 @@
   1. Создаёт `TelemetryEvent` с `time.time()`, `phase`, `mode`
   2. Вызывает `writer.write(event)` в try/except
   3. При ошибке — `logging.error()`, не пробрасывает дальше
-- `__init__`: `writer: SupportsWrite | None = None` (для тестов без writer)
+
 
 ### 7. Тесты для Logger (`src/tests/test_telemetry_logger.py`)
 - `test_logger_with_mock_writer`: logger с mock writer (проверяет вызов)
@@ -92,4 +92,6 @@
 - **phase/mode**: задаются в `TelemetryLogger.__init__`, подставляются автоматически при построении TelemetryEvent
 - **Crash-safety**: `logger.log()` — try/except, logging.error(), не пробрасывает дальше
 - **Flush-политика**: `writer.write()` → `self._file.flush()` после каждой записи
+- **Encoding**: явно указывать `encoding="utf-8"` при open() в TelemetryWriter
+- **Caplog**: в test_logger_swallows_writer_errors проверить через caplog, что logging.error() вызван с содержательным сообщением, а не просто что исключение не пробросилось
 - **Reference**: `FreeEnergyResult` из `src/core/energy/` — аналогичный frozen dataclass

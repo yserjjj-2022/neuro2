@@ -27,3 +27,5 @@
 | [Phase1][telemetry] Task 6 | Реализовать logger.py: TelemetryLogger + SupportsWrite | Shell с DI через Protocol, phase/mode в __init__, crash-safety | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 7 | Реализовать tests/test_telemetry_logger.py | 2 unit-теста: mock writer, swallows errors | P0 | 2025-01-16 |
 | [Phase1][telemetry] Task 8 | Обновить __init__.py | Re-export TelemetryEvent, serialize_event, TelemetryWriter, TelemetryLogger | P0 | 2025-01-16 |
+| [Phase1][integration] Task 1 | Связка EnergyObserver + TelemetryLogger | Правильный адаптер: `sink=lambda r: telemetry_logger.log(r.f, r.valence, r.allostatic_stress)` — active_columns=0 по умолчанию. r.f (НЕ r.free_energy!) | P0 | 2025-01-16 |
+| [Phase3][cmc] Task 1 | Прокинуть реальный active_columns из src/core/cmc/ в telemetry_logger.log() | Active_columns — концепт ансамбля колонок (cmc), не energy. Текущий default=0. TODO: при реализации cmc заменить адаптер на `lambda r, cols: telemetry_logger.log(r.f, r.valence, r.allostatic_stress, cols)` | P1 | 2025-01-16 |

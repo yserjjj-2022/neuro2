@@ -13,17 +13,18 @@
 @dataclass(frozen=True)
 class TelemetryEvent:
     """Событие телеметрии — плоская структура, сериализуемая в JSON.
-    
+
     Аналог FreeEnergyResult из src/core/energy/, но для логирования.
     phase/mode заполняются TelemetryLogger.log(), а не вызывающим кодом.
     """
-    timestamp: float                  # Unix timestamp (time.time())
-    free_energy: float                # Сырое значение F(t)
-    valence: float                    # Валентность (-dF/dt)
-    allostatic_stress: float          # Интеграл F(t) по времени
-    active_columns: int               # Количество активных колонок
-    phase: str                        # Фаза проекта (из config)
-    mode: str                         # Режим (game/cooperative/free)
+
+    timestamp: float  # Unix timestamp (time.time())
+    free_energy: float  # Сырое значение F(t)
+    valence: float  # Валентность (-dF/dt)
+    allostatic_stress: float  # Интеграл F(t) по времени
+    active_columns: int  # Количество активных колонок
+    phase: str  # Фаза проекта (из config)
+    mode: str  # Режим (game/cooperative/free)
 ```
 
 ### Serialize (Functional Core — чистая функция)
@@ -93,23 +94,24 @@ class TelemetryWriter:
 ```python
 class SupportsWrite(Protocol):
     """Protocol для duck typing writer-а."""
+
     def write(self, event: TelemetryEvent) -> None: ...
 
 
 class TelemetryLogger:
     """Shadow-наблюдатель: логирует F(t) без принятия решений.
-    
+
     Соответствует паттерну energy:
     - Ядро (serialize_event) — чистая функция, тестируется без I/O
     - Shell (TelemetryWriter) — владеет файлом
     - Logger — инъекция writer через Protocol, можно мокать в тестах
-    
+
     phase/mode задаются в __init__, подставляются при построении TelemetryEvent.
-    
+
     Crash-safety: не пробрасывает исключения от writer — не должна ронять
     основной цикл хоста.
     """
-    
+
     def __init__(
         self,
         writer: SupportsWrite,
@@ -123,7 +125,7 @@ class TelemetryLogger:
             mode: Текущий режим (game/cooperative/free).
         """
         ...
-    
+
     def log(
         self,
         free_energy: float,
@@ -132,10 +134,10 @@ class TelemetryLogger:
         active_columns: int = 0,
     ) -> None:
         """Записать событие в лог.
-        
+
         Автоматически добавляет timestamp, phase, mode.
         Не пробрасывает исключения от writer.
-        
+
         Args:
             free_energy: Значение F(t).
             valence: Валентность.
