@@ -68,7 +68,7 @@ class CMCPipeline:
 
         # Активности колонок = ‖e‖² по строкам errors → вход для k-WTA
         activities = np.sum(out.errors**2, axis=1)
-        self.voting.vote(activities)  # результат → .last (будущие аттракторы)
+        self.voting.vote(activities)  # результат → .last (телеметрия/логирование)
 
         return self.observer.observe(np.ravel(out.errors), precision)
 
