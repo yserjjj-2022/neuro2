@@ -27,11 +27,12 @@ class SignalRegistry:
         active_threshold: Порог активности колонки (передаётся в CMCEnsemble).
     """
 
-    def __init__(self, active_threshold: float = 0.0) -> None:
+    def __init__(self, active_threshold: float = 1e-8) -> None:
         """Создание registry с порогом активности.
 
         Args:
-            active_threshold: Порог для CMCEnsemble.active.
+            active_threshold: Порог для CMCEnsemble.
+                Дефолт 1e-8 — EMA never converges to exact 0.0 in float64.
         """
         self._active_threshold = active_threshold
         self._sources: list[SignalSource] = []

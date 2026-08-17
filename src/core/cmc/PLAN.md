@@ -51,7 +51,7 @@
 - `test_column_step_shape_mismatch`: `u.shape != prev.x.shape` → ValueError
 
 ### 4. Ensemble Shell (`ensemble.py`)
-- `CMCEnsemble.__init__(columns: list[ColumnConfig], active_threshold: float = 0.0)`
+- `CMCEnsemble.__init__(columns: list[ColumnConfig], active_threshold: float = 1e-8)`
   1. Валидация: пустой список → ValueError; разные `input_dim`/`state_dim` → ValueError
   2. Сохранить конфиги, инициализировать состояния нулями: `self._states: list[ColumnState]`
 - `step(u: np.ndarray) -> EnsembleOutput`
@@ -110,7 +110,7 @@
 - **Vector type alias**: `np.ndarray[Any, np.dtype[np.floating[Any]]]` — numpy-дженерики инвариантны, `np.floating[Any]` принимает и float32, и float64 (идиома из `src/memory/serialize.py`)
 - **Чистота column_step**: `x_new` и `e_new` — результаты арифметических операций (`prev.x + ...`, `u - ...`), NumPy создаёт новые массивы. Тест purity: изменить `u` после вызова — результат не меняется
 - **Единые размерности**: все колонки ансамбля имеют одинаковые `input_dim`/`state_dim` — валидация в `__init__`, не в `step`
-- **active_threshold дефолт 0.0**: любая ненулевая ошибка → колонка активна. `np.sum(e ** 2) > 0.0` — точное сравнение с нулём корректно (нулевая ошибка = точный ноль)
+- **active_threshold дефолт 1e-8**: EMA never converges to exact 0.0 in float64 (свойство рекуррентного фильтра, не баг). Значение 1e-8 предотвращает ложноположительные active_columns при длительной сходимости. `np.sum(e ** 2) > 1e-8` — корректное сравнение.
 - **Stacking**: `np.stack([s.e for s in states])` → shape `(N, input_dim)`. Не `np.array` (может дать object array при разных shapes — но валидация гарантирует одинаковые)
 - **Debug logging**: `logger.debug` при fail-fast валидациях — best effort, не покрывается тестом
 - **Удаление Column**: `src/core/__init__.py` — единственный импортёр `Column` (подтверждено grep). Одновременное обновление `__init__.py` + `cmc/__init__.py` гарантирует, что импорт пакета не сломается

@@ -14,7 +14,7 @@ from src.mcp.registry import SignalRegistry
 
 @pytest.fixture()
 def registry() -> SignalRegistry:
-    return SignalRegistry(active_threshold=0.0)
+    return SignalRegistry()
 
 
 @pytest.fixture()

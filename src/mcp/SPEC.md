@@ -54,37 +54,12 @@ class SignalSource:
 
 ```python
 class SignalRegistry:
-    def __init__(self, active_threshold: float = 0.0) -> None:
-        """Создание registry с порогом активности."""
-        ...
+    def __init__(self, active_threshold: float = 1e-8) -> None:
+        """Создание registry с порогом активности.
 
-    def register(self, signal: SignalSource) -> None:
-        """Добавить источник сигнала."""
-        ...
-
-    def unregister_by_tag(self, tag: str) -> bool:
-        """Удалить источники по tag. Возвращает True, если удалены."""
-        ...
-
-    def clear(self) -> None:
-        """Удалить все источники."""
-        ...
-
-    def get_by_category(self, category: SignalCategory) -> list[SignalSource]:
-        """Фильтрация по категории."""
-        ...
-
-    def get_reflex_signals(self) -> list[SignalSource]:
-        """Получить reflex-сигналы (только interoceptive severity ≥ 0.9)."""
-        ...
-
-    def aggregate(self) -> Optional[Vector]:
-        """Агрегировать все сигналы в единый вектор u(t).
-        
-        В Фазе 1: простая конкатенация.
-        В Фазе 2+: проекции по специализациям.
-        
-        Returns: Vector shape=(total_dim,) или None если нет источников.
+        Args:
+            active_threshold: Порог для CMCEnsemble.
+                Дефолт 1e-8 — EMA never converges to exact 0.0 in float64.
         """
         ...
 

@@ -105,7 +105,7 @@ def build_cmc_pipeline(
     columns: list[ColumnConfig],
     k: int,
     log_path: Path,
-    active_threshold: float = 0.0,
+    active_threshold: float = 1e-8,
 ) -> CMCPipeline:
     """Собирает полный per-tick конвейер: CMC → voting → attractors → energy → telemetry.
 
@@ -114,6 +114,8 @@ def build_cmc_pipeline(
         k: Число победителей k-WTA (1 = hard-WTA).
         log_path: Путь к JSONL-файлу для записи телеметрии.
         active_threshold: Порог активности колонки (‖e‖² > threshold).
+            Дефолт 1e-8 — EMA never converges to exact 0.0 in float64,
+            so 0.0 would produce false-positive active_columns.
 
     Returns:
         CMCPipeline — готовый к tick(u, precision).

@@ -32,7 +32,7 @@ class CMCEnsemble:
     def __init__(
         self,
         columns: list[ColumnConfig],
-        active_threshold: float = 0.0,
+        active_threshold: float = 1e-8,
     ) -> None:
         """Создание ансамбля: валидация, инициализация состояний нулями.
 
@@ -40,6 +40,10 @@ class CMCEnsemble:
             columns: Конфигурации колонок. Все должны иметь одинаковые
                 input_dim и state_dim.
             active_threshold: Колонка активна, если ||e(t)||² > threshold.
+                Дефолт 1e-8: EMA никогда не сходится к точному 0.0
+                (свойство рекуррентного фильтра в float64), поэтому 0.0
+                давала бы ложноположительные active_columns при любой
+                длительной сходимости.
 
         Raises:
             ValueError: Если список пуст, или input_dim/state_dim

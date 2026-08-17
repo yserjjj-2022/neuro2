@@ -107,6 +107,12 @@ def test_ensemble_active_before_step() -> None:
     assert ensemble.active == 0
 
 
+def test_ensemble_default_threshold() -> None:
+    """active_threshold по умолчанию = 1e-8 (EMA never converges to exact 0.0)."""
+    ensemble = CMCEnsemble(columns=[ColumnConfig(input_dim=3, state_dim=3)])
+    assert ensemble.active_threshold == pytest.approx(1e-8)
+
+
 def test_ensemble_active_threshold() -> None:
     """active_threshold > 0: только колонки с ||e||² > threshold активны."""
     ensemble = CMCEnsemble(
