@@ -5,7 +5,7 @@ This is the ONLY place in the codebase that knows the concrete field
 names of FreeEnergyResult (result.f, result.valence, etc.),
 isolating the risk of interface desync to one location.
 
-Also builds the full per-tick pipeline: CMC → voting → energy → telemetry.
+Also builds the full per-tick pipeline: CMC → voting → attractors → energy → telemetry.
 CMCPipeline.tick(u, precision) runs one complete host tick; u and precision
 are passed by the caller (future host loop / Phase 2 MCP resources).
 """
@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.core.attractors import TaskAttractor
 from src.core.cmc import CMCEnsemble, ColumnConfig
 from src.core.cmc.models import Vector
 from src.core.energy import EnergyObserver, FreeEnergyCalculator, FreeEnergyResult
@@ -26,18 +27,21 @@ from src.telemetry import TelemetryLogger, TelemetryWriter
 
 @dataclass(frozen=True)
 class CMCPipeline:
-    """Композиция per-tick: CMC → voting → energy → telemetry.
+    """Композиция per-tick: CMC → voting → attractors → energy → telemetry.
 
     Attributes:
         ensemble: Ансамбль колонок (производитель e(t) и активностей).
         voting: k-WTA по активностям колонок (результат кэшируется в .last
-            для будущих аттракторов задач — Фаза 2).
+            для телеметрии).
+        attractor: TaskAttractor — множественная устойчивая динамика выбора
+            задачи (читает тот же вектор activities, что и voting).
         observer: EnergyObserver с sink в телеметрию (active_columns
             берётся из ensemble.active — закрывает TODO из build_energy_pipeline).
     """
 
     ensemble: CMCEnsemble
     voting: VotingManager
+    attractor: TaskAttractor
     observer: EnergyObserver
 
     def tick(self, u: Vector, precision: Vector) -> FreeEnergyResult:
@@ -69,6 +73,7 @@ class CMCPipeline:
         # Активности колонок = ‖e‖² по строкам errors → вход для k-WTA
         activities = np.sum(out.errors**2, axis=1)
         self.voting.vote(activities)  # результат → .last (телеметрия/логирование)
+        self.attractor.tick(activities)  # аттрактор задач (параллельный потребитель)
 
         return self.observer.observe(np.ravel(out.errors), precision)
 
@@ -102,7 +107,7 @@ def build_cmc_pipeline(
     log_path: Path,
     active_threshold: float = 0.0,
 ) -> CMCPipeline:
-    """Собирает полный per-tick конвейер: CMC → voting → energy → telemetry.
+    """Собирает полный per-tick конвейер: CMC → voting → attractors → energy → telemetry.
 
     Args:
         columns: Конфигурации колонок ансамбля (единые input_dim/state_dim).
@@ -115,6 +120,7 @@ def build_cmc_pipeline(
     """
     ensemble = CMCEnsemble(columns=columns, active_threshold=active_threshold)
     voting = VotingManager(k=k)
+    attractor = TaskAttractor(n_tasks=len(columns))
 
     writer = TelemetryWriter(log_path=log_path)
     telemetry_logger = TelemetryLogger(writer=writer, phase="phase1", mode="free")
@@ -130,4 +136,4 @@ def build_cmc_pipeline(
         )
 
     observer = EnergyObserver(calculator=FreeEnergyCalculator(), sink=sink)
-    return CMCPipeline(ensemble=ensemble, voting=voting, observer=observer)
+    return CMCPipeline(ensemble=ensemble, voting=voting, attractor=attractor, observer=observer)
