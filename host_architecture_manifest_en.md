@@ -96,6 +96,25 @@ The key principle is **ecological rationality**: the system does not compute eve
 - Sparse factorization instead of a single POMDP matrix: 3 independent small factors (mode/partner/task) instead of combinatorial explosion in pymdp.
 - pymdp used sparingly — for 4-8 discrete macro-states; all continuous dynamics on NumPy/SciPy.
 
+### H. Signal Category Taxonomy
+- Incoming signals are fundamentally heterogeneous and require different handling. The `SignalSource` contract explicitly distinguishes three categories:
+  - **Exteroceptive** (weather, location, MCP resources) — external world context. Passed through projection into the shared D-dimensional space and aggregated via the standard path.
+  - **Interoceptive** (battery, CPU temperature, homeostatic markers) — internal system state. Protected by homeostatic priority with high precision (a "setpoint"); deviation must trigger action, not just update the world model.
+  - **Communicative inputs** (interlocutor text, messages) — require an explicit policy decision (reply / remain silent / initiate), not just perception.
+- All three categories live under the same `SignalSource` contract but are processed through different routes.
+
+### I. Policy / Action Selection
+- A module that takes the current attractor (TaskAttraction) as input and decides which action to take (reply / remain silent / initiate / invoke a tool), evaluating candidate policies by pragmatic (closeness to preferred outcome) and epistemic (uncertainty reduction) value — analogous to Expected Free Energy in active inference.
+- Logically placed **after** `attractors`, does not replace it. Attractors decide "what to notice", policy decides "what to do".
+- **Goal-directed test:** if the preferred outcome changes, the host's behavior must reconfigure immediately, without retraining. This distinguishes goal-directed behavior from habitual/reflexive (stimulus-response independent of current outcome value). Use as acceptance criterion for the future SPEC.
+- **Explainability — mandatory invariant, not an option.** Every policy-layer decision must leave a traceable footprint: which priority fired, which alternatives were considered, why the chosen one won. Analogous to `logger.debug(reason=...)` in attractors, but mandatory for acceptance, not best-effort. Explainability ≠ trustworthiness — the explanation must be causally traceable to actual computation, not post-hoc generated text.
+- **Anti-pattern:** do not confuse "sounds humanly understandable" with "explainable". Anthropomorphic signals (warm tone, empathy, ToM-behavior) increase perceived trust regardless of actual system reliability — a documented risk in human-AI trust literature. The policy layer must not optimize for "feel of understandability" — only for genuine causal traceability of the decision.
+
+### J. Reflex Path
+- Parallel route for signals marked as critical (`is_reflex` / `severity` in the `SignalSource` contract).
+- Bypasses EMA smoothing (`column_step`) and `dwell`/basin protection of `TaskAttractor` entirely.
+- Goal: guarantee one-tick reaction for signals like critical battery charge, where noise robustness (intentionally built into attractors) is a harmful property.
+
 ### G. MCP as Senses and Actions
 - MCP Resources — passive background sensory input (weather, location, device status), mixed into u(t) on slow tick.
 - MCP Tools — active epistemic actions: invoked when uncertainty is better reduced by external query than by inference.
