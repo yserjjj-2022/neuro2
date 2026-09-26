@@ -4,6 +4,7 @@
 
 ## Навигация по проекту
 
+- [`INTENT.md`](INTENT.md) — зачем проект: выращивание, а не программирование
 - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S6, ворота
 - [`VALIDATION.md`](VALIDATION.md) — проверка, сценарии, инварианты
 - [`SPECS.md`](SPECS.md) — реестр модульных спецификаций
@@ -40,13 +41,18 @@ src/
 ## Статус
 
 Host loop собран и работает: `u(t) → CMC → voting/attractors → energy →
-telemetry (JSONL)`, 222 теста. Мок-сенсорика (`src/host/sources.py`),
-параметры (`src/config/`), CLI. Далее — speech (Б1) и реальные интеграции.
+telemetry (JSONL)`. **S1 (честные сигналы) завершён:** единая временная база,
+сглаженная valence, настоящая γ, ресурсная интероцепция, guard дрейфа;
+286 тестов. Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`),
+CLI. Далее — S2 (непрерывность: эмбеддер + память).
+
+Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
+программирование поведения.
 
 ## Запуск
 
 ```bash
-uv run python -m src --ticks 100 --dt 0.01 --log run.jsonl
+uv run python -m src --ticks 100 --log run.jsonl
 ```
 
 `--ticks 0` — бесконечный цикл до Ctrl+C. Полный список: `--help`.
