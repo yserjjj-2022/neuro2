@@ -18,7 +18,13 @@
 
 ```bash
 uv sync
+cp .env.example .env   # заполнить EMBEDDER_API_KEY (RouterAI)
 ```
+
+Эмбеддер по умолчанию — RouterAI (`https://routerai.ru`), настройки в `.env`
+(не коммитится): `EMBEDDER_API_KEY`, `EMBEDDER_BASE_URL`, `EMBEDDER_MODEL`,
+`EMBEDDER_DIM`. Без ключа `embedder_mode="auto"` использует детерминированный
+fake-эмбеддер (тесты/replay).
 
 ## Структура
 

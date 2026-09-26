@@ -14,8 +14,11 @@
 - Векторный поиск: vec0 (sqlite-vec), MATCH в подзапросе (обход бага 0.1.9)
 
 S2 (непрерывность) добавлено:
-- `Embedder` Protocol + `FakeEmbedder` (детерминизм) + `ApiEmbedder` (OpenAI)
+- `Embedder` Protocol + `FakeEmbedder` (детерминизм) + `ApiEmbedder`
+  (OpenAI-совместимый, RouterAI по умолчанию; L2-нормировка + кэш)
   + `build_embedder` (режим `auto`: ключ→api, иначе fake)
+- Настройки API — в `.env` (`EMBEDDER_API_KEY`/`_BASE_URL`/`_MODEL`/`_DIM`);
+  шаблон — `.env.example`; `.env` в `.gitignore`
 - `MemoryRouter` — оркестрация: recall → приор в шину, запись эпизодов на
   значимых событиях (reflex / всплеск F); сбой памяти не роняет тик
 - Приор `[cos, tanh(valence), tanh(stress), tanh(f)]` (dim=4) — сегмент шины

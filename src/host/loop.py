@@ -37,6 +37,7 @@ from src.memory import (
     MemoryRouter,
     MemoryStore,
     build_embedder,
+    embedder_settings_from_env,
 )
 from src.telemetry import TelemetryLogger, TelemetryWriter
 
@@ -292,10 +293,13 @@ def build_host_loop(
     memory: MemoryRouter | None = None
     message_provider: TextMessageProvider | None = None
     if config.memory.enabled:
+        api = embedder_settings_from_env()
         embedder = build_embedder(
             mode=config.memory.embedder_mode,
             dim=config.memory.embedding_dim,
-            model=config.memory.embedding_model,
+            model=str(api["model"]),
+            base_url=str(api["base_url"]),
+            api_dim=int(api["api_dim"]),  # type: ignore[arg-type]
         )
         store = MemoryStore(db_path=config.memory.db_path, embedding_dim=embedder.dim)
         memory = MemoryRouter(

@@ -11,6 +11,8 @@ import logging
 import signal
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from src.config import HostConfig, MemoryConfig
 from src.host.loop import HostLoop, build_host_loop
 
@@ -106,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Код выхода (0 — успех).
     """
+    load_dotenv()  # .env → окружение (EMBEDDER_API_KEY, EMBEDDER_MODEL, ...)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

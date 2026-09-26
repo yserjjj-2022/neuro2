@@ -21,11 +21,14 @@ from src.core.energy import FreeEnergyCalculator
 class MemoryConfig:
     """Параметры эпизодической памяти и эмбеддера (S2).
 
+    Настройки API-эмбеддера (base_url, model, dim) — в окружении (.env):
+    ``EMBEDDER_BASE_URL``, ``EMBEDDER_MODEL``, ``EMBEDDER_DIM``, ``EMBEDDER_API_KEY``
+    (RouterAI по умолчанию). Здесь — поведение памяти и размерность fake.
+
     Attributes:
         enabled: Включать ли память в host loop.
         embedder_mode: "auto" (ключ→api, иначе fake), "fake", "api".
         embedding_dim: Размерность fake-эмбеддера (= dim коммуникативного входа).
-        embedding_model: Модель API-эмбеддера.
         db_path: Путь к SQLite-файлу памяти.
         episode_spike_threshold: Порог всплеска F для записи эпизода.
         recall_limit: Сколько эпизодов извлекать при recall.
@@ -35,7 +38,6 @@ class MemoryConfig:
     enabled: bool = True
     embedder_mode: str = "auto"
     embedding_dim: int = 8
-    embedding_model: str = "text-embedding-3-small"
     db_path: str = "host_memory.db"
     episode_spike_threshold: float = 1.0
     recall_limit: int = 1

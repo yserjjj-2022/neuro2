@@ -40,11 +40,13 @@
 | `enabled` | True | Включить память в loop |
 | `embedder_mode` | "auto" | auto (ключ→api, иначе fake), fake, api |
 | `embedding_dim` | 8 | Размерность fake-эмбеддера / коммуникативного входа |
-| `embedding_model` | "text-embedding-3-small" | Модель API |
 | `db_path` | "host_memory.db" | Файл БД памяти |
 | `episode_spike_threshold` | 1.0 | Порог всплеска F для эпизода |
 | `recall_limit` | 1 | Сколько эпизодов извлекать |
 | `prior_dim` | 4 | Размерность приора в шине |
+
+API-настройки эмбеддера — в окружении (`.env`), не в `MemoryConfig`:
+`EMBEDDER_API_KEY`, `EMBEDDER_BASE_URL`, `EMBEDDER_MODEL`, `EMBEDDER_DIM`.
 
 ### HostConfig
 

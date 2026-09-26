@@ -56,35 +56,59 @@ class FakeEmbedder:
     def embed(self, text: str) -> Vector: ...
 
 class ApiEmbedder:
-    """OpenAI embeddings (event-triggered, ленивый клиент).
+    """OpenAI-совместимый эмбеддер (RouterAI по умолчанию), ленивый клиент.
 
-    Клиент создаётся при первом вызове (ключ из env/аргумента). Сбой сети →
-    EmbedderError. Тестами НЕ покрывается (сеть) — только контракт и smoke.
+    Клиент создаётся при первом вызове (ключ из env/аргумента). Вектор
+    L2-нормируется (масштаб не зависит от модели/размерности). Кэширует
+    текст → вектор (активное сообщение не меняется между тиками).
+    Сбой сети → EmbedderError. Тестами НЕ покрывается (сеть) — только
+    контракт и фабрика.
     """
-    def __init__(self, model: str = "text-embedding-3-small", dim: int = 1536,
-                 api_key: str | None = None) -> None: ...
+    def __init__(self, model: str = "voyageai/voyage-4-lite", dim: int = 256,
+                 base_url: str = "https://routerai.ru/api/v1",
+                 api_key: str | None = None, normalize: bool = True) -> None: ...
     @property
     def dim(self) -> int: ...
     def embed(self, text: str) -> Vector: ...
 ```
 
+### Конфигурация через окружение (.env)
+
+API-настройки НЕ в коде, а в `.env` (в `.gitignore`; шаблон — `.env.example`):
+
+| Переменная | Дефолт | Смысл |
+|---|---|---|
+| `EMBEDDER_API_KEY` | — | Ключ RouterAI (обязателен для api/auto→api) |
+| `EMBEDDER_BASE_URL` | `https://routerai.ru/api/v1` | OpenAI-совместимый base URL |
+| `EMBEDDER_MODEL` | `voyageai/voyage-4-lite` | Модель эмбеддингов |
+| `EMBEDDER_DIM` | `256` | Размерность (Matryoshka-усечение) |
+
+CLI вызывает `load_dotenv()`. `embedder_settings_from_env()` читает настройки;
+`build_embedder` принимает их явно (DI). RouterAI — OpenAI-совместимый шлюз:
+`client.embeddings.create(model, input, dimensions, encoding_format="float")`.
+
 ### Выбор эмбеддера: режим `auto`
 
 `embedder_mode` — три режима:
 
-- **`auto`** (дефолт): если ключ доступен в окружении (`OPENAI_API_KEY`) →
-  `ApiEmbedder`; иначе → `FakeEmbedder`. Тесты (без ключа) детерминированы;
-  боевой запуск (с ключом) использует реальный эмбеддер.
+- **`auto`** (дефолт): если ключ доступен в окружении (`EMBEDDER_API_KEY`) →
+  `ApiEmbedder`; иначе → `FakeEmbedder`. Тесты (ключ очищен `conftest.py`)
+  детерминированы; боевой запуск (с ключом) использует реальный эмбеддер.
 - **`fake`**: всегда `FakeEmbedder` (тесты, replay, офлайн).
 - **`api`**: всегда `ApiEmbedder` (явный боевой режим; ошибка, если нет ключа).
 
-Фабрика: `build_embedder(mode, dim, model, api_key=None) -> Embedder`.
+Фабрика: `build_embedder(mode, dim, model, base_url, api_dim, api_key)`.
 `auto` логирует выбранный режим при старте (наблюдаемость).
+
+**Нормировка:** и `FakeEmbedder`, и `ApiEmbedder` возвращают L2-нормированный
+вектор → масштаб F не зависит от модели/размерности, пороги переносимы,
+косинус = скалярное произведение.
 
 **Инварианты:**
 - `embed("")` → вектор нулей (не ошибка).
 - `FakeEmbedder`: одинаковый текст → одинаковый вектор (детерминизм).
 - Возврат: 1-D `float64`, `shape == (dim,)`, конечные значения.
+- Возврат L2-нормирован (норма 1.0 для непустого текста) — оба эмбеддера.
 - `auto` без ключа → `fake`; `api` без ключа → `ValueError` (fail-fast).
 
 ## 2. Коммуникативный вход как текст

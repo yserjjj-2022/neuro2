@@ -35,15 +35,27 @@ class FakeEmbedder:  # детерминированный bag-of-tokens hashing
 
 
 @dataclass
-class ApiEmbedder:  # OpenAI, ленивый клиент
-    model: str = "text-embedding-3-small"
-    dim: int = 1536
+class ApiEmbedder:  # OpenAI-совместимый (RouterAI), ленивый клиент
+    model: str = "voyageai/voyage-4-lite"
+    dim: int = 256
+    base_url: str = "https://routerai.ru/api/v1"
     api_key: str | None = None
+    normalize: bool = True
 
 
-def build_embedder(mode="auto", dim=8, model=..., api_key=None) -> Embedder:
+def build_embedder(
+    mode="auto", dim=8, model=..., base_url=..., api_dim=256, api_key=None
+) -> Embedder:
     """auto: ключ→api, иначе fake; fake; api (без ключа → ValueError)."""
+
+
+def embedder_settings_from_env() -> dict[str, object]:
+    """base_url/model/api_dim из EMBEDDER_* (с дефолтами)."""
 ```
+
+Настройки API — в `.env` (`EMBEDDER_API_KEY`, `_BASE_URL`, `_MODEL`, `_DIM`),
+CLI грузит `load_dotenv()`. Векторы L2-нормируются; `ApiEmbedder` кэширует
+текст → вектор.
 
 ### Значимые события (Core)
 

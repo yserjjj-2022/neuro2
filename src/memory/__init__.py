@@ -15,11 +15,19 @@ Re-exports:
 """
 
 from .embedder import (
+    DEFAULT_API_DIM,
+    DEFAULT_API_MODEL,
+    DEFAULT_BASE_URL,
+    ENV_API_KEY,
+    ENV_BASE_URL,
+    ENV_DIM,
+    ENV_MODEL,
     ApiEmbedder,
     Embedder,
     EmbedderError,
     FakeEmbedder,
     build_embedder,
+    embedder_settings_from_env,
 )
 from .errors import MemoryStoreError
 from .events import build_event_content, is_significant_event
@@ -33,6 +41,13 @@ from .similarity import cosine_similarity
 from .store import MemoryStore
 
 __all__ = [
+    "DEFAULT_API_DIM",
+    "DEFAULT_API_MODEL",
+    "DEFAULT_BASE_URL",
+    "ENV_API_KEY",
+    "ENV_BASE_URL",
+    "ENV_DIM",
+    "ENV_MODEL",
     "MEMORY_PRIOR_DIM",
     "ApiEmbedder",
     "Embedder",
@@ -49,6 +64,7 @@ __all__ = [
     "content_hash",
     "cosine_similarity",
     "deserialize_embedding",
+    "embedder_settings_from_env",
     "encode_memory_prior",
     "is_significant_event",
     "serialize_embedding",
