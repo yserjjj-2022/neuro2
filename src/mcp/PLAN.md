@@ -6,8 +6,8 @@
 2. `src/mcp/registry.py` — `SignalRegistry` (shell) ✅
 3. `src/mcp/__init__.py` — Re-exports ✅
 4. `src/mcp/SPEC.md` — Спецификация ✅
-5. `src/tests/test_mcp_models.py` — Unit-тесты для моделей
-6. `src/tests/test_mcp_registry.py` — Unit-тесты для registry
+5. `src/tests/test_mcp_models.py` — Unit-тесты для моделей ✅
+6. `src/tests/test_mcp_registry.py` — Unit-тесты для registry ✅
 
 ## Зависимости
 

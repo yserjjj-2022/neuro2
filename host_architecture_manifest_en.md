@@ -1,5 +1,17 @@
 # Adaptive Host Architecture Manifest
 
+> **On build order and validation.** This document describes the *technical
+> subsystems* (what we build). For *build order, control gates and behavioral
+> validation* see:
+> - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — stages S1–S6, manifest/code
+>   conflicts and their resolution;
+> - [`VALIDATION.md`](VALIDATION.md) — validation levels, canonical scenarios,
+>   organism invariants, gates, regression;
+> - [`adr/0005-build-order-fep-fallback-and-guardrails.md`](adr/0005-build-order-fep-fallback-and-guardrails.md) —
+>   decision on build order, FEP fallback, capability tiers and guardrails.
+>
+> The history below is not rewritten (append-only spirit of CONSTITUTION §6).
+
 ## 1. Core Concept
 
 The system is built on principles analogous to the neocortex: canonical columnar microcircuits, continuous time, predictive coding, and free energy minimization (Active Inference). The goal is not a monolithic LLM, but a modular, temporally consistent host-interlocutor/co-player capable of situational learning, endowed with a sense of time, emotional dynamics, stable character, and the ability for autonomous evolution.

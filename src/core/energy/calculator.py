@@ -44,7 +44,7 @@ class FreeEnergyCalculator:
             prev_stress: Значение allostatic_stress(t-1).
 
         Returns:
-            FreeEnergyResult с полями: f, valence, stress, gamma.
+            FreeEnergyResult с полями: f, valence, allostatic_stress, gamma.
 
         Raises:
             ValueError: Если prediction_error.shape != precision.shape.

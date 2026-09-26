@@ -2,6 +2,16 @@
 
 Адаптивный хост на основе принципов неокортекса: канонические колоночные микроконтуры, свободная энергия, активное выведение.
 
+## Навигация по проекту
+
+- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S6, ворота
+- [`VALIDATION.md`](VALIDATION.md) — проверка, сценарии, инварианты
+- [`SPECS.md`](SPECS.md) — реестр модульных спецификаций
+- [`CONSTITUTION.md`](CONSTITUTION.md) — правила проекта
+- [`host_architecture_manifest.md`](host_architecture_manifest.md) — архитектура
+- [`BACKLOG.md`](BACKLOG.md) — задачи по стадиям
+- [`adr/`](adr/) — Architecture Decision Records
+
 ## Установка
 
 ```bash
@@ -15,20 +25,30 @@ src/
 ├── core/           # Колоночное ядро (CMC)
 │   ├── cmc/        # Canonical Microcircuits
 │   ├── energy/     # Free Energy, valence
-│   └── voting/     # k-WTA lateral inhibition
+│   ├── voting/     # k-WTA lateral inhibition
+│   └── attractors/ # Task attractors (STP)
+├── host/           # Обвязка: wiring (pipeline), sources (сенсорика)
 ├── memory/         # SQLite + sqlite-vec
-├── speech/         # Intent-Frame, Steering
-├── mcp/            # MCP Integration
-├── tm/             # Theory of Mind
+├── speech/         # Intent-Frame, Steering (не реализовано)
+├── mcp/            # Контракт сигналов; MCP transport (не реализован)
+├── tm/             # Theory of Mind (не реализовано)
 ├── telemetry/      # Логирование, самодиагностика
 └── config/         # Конфигурация
 ```
 
+## Статус
+
+Host loop собран и работает: `u(t) → CMC → voting/attractors → energy →
+telemetry (JSONL)`, 222 теста. Мок-сенсорика (`src/host/sources.py`),
+параметры (`src/config/`), CLI. Далее — speech (Б1) и реальные интеграции.
+
 ## Запуск
 
 ```bash
-uv run python -m src
+uv run python -m src --ticks 100 --dt 0.01 --log run.jsonl
 ```
+
+`--ticks 0` — бесконечный цикл до Ctrl+C. Полный список: `--help`.
 
 ## Лицензия
 
