@@ -385,25 +385,65 @@ class NoisyProvider:
         return SignalSource(category=self.category, data=data, tag=self.tag)
 
 
-def default_providers(message_dim: int = 8, seed: int = 0) -> list[SignalProvider]:
+def default_providers(
+    message_dim: int = 8,
+    seed: int = 0,
+    resource_provider: SignalProvider | None = None,
+) -> list[SignalProvider]:
     """Стандартный набор источников для host loop.
 
-    Состав: circadian(2) + battery(1) + cpu(1) + user_message(message_dim).
-    Итоговая ширина шины: 4 + message_dim (по умолчанию 12).
+    Состав: circadian(2) + battery(1) + cpu(1) + user_message(message_dim)
+    + resources(2, если передан). Итоговая ширина шины: 6 + message_dim
+    при наличии ресурсного провайдера (по умолчанию 14).
 
     Args:
         message_dim: Размерность заглушки сообщения (embedding_dim).
         seed: Зерно детерминированных генераторов (cpu, message).
+        resource_provider: Ресурсный провайдер (инъекция meter).
+            None → ресурсный канал не добавляется (шина 12).
 
     Returns:
         Список провайдеров в порядке укладки на шину.
     """
-    return [
+    providers: list[SignalProvider] = [
         CircadianProvider(),
         BatteryProvider(),
         CpuProvider(seed=seed),
         UserMessageProvider(embedding_dim=message_dim, seed=seed),
     ]
+    if resource_provider is not None:
+        providers.append(resource_provider)
+    return providers
+
+
+def tags_above_threshold(
+    errors: Vector,
+    segments: tuple[BusSegment, ...],
+    threshold: float,
+) -> list[str]:
+    """Теги сегментов шины с агрегированной по колонкам ошибкой выше порога.
+
+    Чистая функция: не мутирует входы.
+
+    Args:
+        errors: Ошибки колонок, shape=(n_columns, bus_dim).
+        segments: Карта сегментов шины (name, offset, dim, period).
+        threshold: Порог ‖e‖² сегмента.
+
+    Returns:
+        Список тегов в порядке сегментов (только превысившие порог).
+    """
+    if errors.ndim != 2:
+        raise ValueError(f"errors must be 2D (n_columns, bus_dim), got {errors.ndim}D")
+
+    # Агрегируем ‖e‖² по колонкам (axis=0) для каждого канала шины
+    per_channel = np.sum(errors**2, axis=0)
+    tags: list[str] = []
+    for segment in segments:
+        window = per_channel[segment.offset : segment.offset + segment.dim]
+        if float(np.sum(window)) > threshold:
+            tags.append(segment.name)
+    return tags
 
 
 @dataclass(frozen=True)

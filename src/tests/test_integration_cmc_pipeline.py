@@ -1,28 +1,21 @@
-"""Integration test: CMC → voting → energy → telemetry pipeline.
+"""Integration test: CMC → voting → energy pipeline (no I/O).
 
-Verifies the full per-tick pipeline end-to-end — no mocks, real file I/O,
-real serialization. This is the ONLY way to catch wiring bugs like
-stale active_columns cache or shape mismatch between precision and
-raveled errors before production.
+Telemetry moved to the host loop in S1, so this test verifies the pure
+composition via TickOutcome. Full JSONL I/O is covered by test_host_loop.py.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from src.core.cmc.models import ColumnConfig
-from src.host.wiring import CMCPipeline, build_cmc_pipeline
+from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
 
 
 @pytest.fixture()
 def pipeline(tmp_path: Path) -> CMCPipeline:
-    """Полный конвейер: 3 колонки input_dim=2, k-WTA с k=2.
-
-    active_threshold=1e-8: EMA-сходимость не достигает точно нуля в float64
-    (остаток ~6e-10), порог позволяет проверять «колонка сошлась → не активна».
-    """
+    """Полный конвейер: 3 колонки input_dim=2, k-WTA с k=2."""
     return build_cmc_pipeline(
         columns=[
             ColumnConfig(input_dim=2, state_dim=2, specialization="tone"),
@@ -35,68 +28,61 @@ def pipeline(tmp_path: Path) -> CMCPipeline:
     )
 
 
-def test_pipeline_first_tick(pipeline: CMCPipeline, tmp_path: Path) -> None:
-    """Первый тик: активные колонки, F > 0, active_columns из cmc в JSONL."""
+def test_pipeline_first_tick(pipeline: CMCPipeline) -> None:
+    """Первый тик: активные колонки, F > 0, voting кэширован."""
     u = np.array([1.0, 2.0])
     precision = np.ones(6)  # raveled errors: N_columns * input_dim = 3 * 2
 
-    result = pipeline.tick(u, precision)
+    outcome = pipeline.tick(u, precision, dt=0.01)
 
-    # Первый шаг из нулей: все колонки активны, F > 0
+    assert isinstance(outcome, TickOutcome)
     assert pipeline.ensemble.active == 3
-    assert result.f > 0.0
+    assert outcome.result.f > 0.0
+    assert outcome.result.gamma == pytest.approx(1.0)
 
-    # voting: результат кэширован в .last для будущих аттракторов
+    # voting: результат кэширован в .last
     assert pipeline.voting.last is not None
     assert len(pipeline.voting.last.indices) == 2
 
-    # Телеметрия: active_columns из cmc (не устаревший дефолт 0)
-    lines = (tmp_path / "test.jsonl").read_text().strip().split("\n")
-    assert len(lines) == 1
-    event = json.loads(lines[0])
-    assert event["active_columns"] == 3
-    assert event["free_energy"] == pytest.approx(result.f)
-    assert event["phase"] == "phase1"
-    assert event["mode"] == "free"
 
-
-def test_pipeline_convergence(pipeline: CMCPipeline, tmp_path: Path) -> None:
-    """Стабильный вход: active → 0, F → 0, active_columns следует за тиками.
-
-    Проверяет, что ensemble.active — результат ПОСЛЕДНЕГО step(), а не
-    устаревшее значение из кэша первого тика.
-    """
+def test_pipeline_convergence(pipeline: CMCPipeline) -> None:
+    """Стабильный вход: active → 0, F → 0 (ensemble.active — последний step)."""
     u = np.array([1.0, 2.0])
     precision = np.ones(6)
 
     for _ in range(200):
-        result = pipeline.tick(u, precision)
+        outcome = pipeline.tick(u, precision, dt=0.01)
 
     assert pipeline.ensemble.active == 0
-    assert result.f < 1e-6
-
-    lines = (tmp_path / "test.jsonl").read_text().strip().split("\n")
-    assert len(lines) == 200
-
-    first = json.loads(lines[0])
-    last = json.loads(lines[-1])
-    assert first["active_columns"] == 3  # первый тик — все активны
-    assert last["active_columns"] == 0  # последний тик — все сошлись
-    assert last["free_energy"] < 1e-6
+    assert outcome.result.f < 1e-6
 
 
 def test_pipeline_shape_mismatch_precision(pipeline: CMCPipeline) -> None:
-    """Несовпадение precision и raveled errors → ValueError из tick() (fail-fast)."""
+    """Несовпадение precision и raveled errors → ValueError из tick()."""
     u = np.array([1.0, 2.0])
 
     with pytest.raises(ValueError):
-        pipeline.tick(u, np.ones(5))  # ожидается 6
+        pipeline.tick(u, np.ones(5), dt=0.01)  # ожидается 6
 
     with pytest.raises(ValueError):
-        pipeline.tick(u, np.ones(7))
+        pipeline.tick(u, np.ones(7), dt=0.01)
 
 
 def test_pipeline_shape_mismatch_u(pipeline: CMCPipeline) -> None:
-    """Несовпадение u и input_dim → ValueError из tick() (fail-fast)."""
+    """Несовпадение u и input_dim → ValueError из tick()."""
     with pytest.raises(ValueError):
-        pipeline.tick(np.array([1.0, 2.0, 3.0]), np.ones(6))  # input_dim=2
+        pipeline.tick(np.array([1.0, 2.0, 3.0]), np.ones(6), dt=0.01)
+
+
+def test_pipeline_active_tags(pipeline: CMCPipeline) -> None:
+    """active_tags заполняются по карте сегментов шины."""
+    from src.host.sources import BusSegment
+
+    segments = (
+        BusSegment(name="a", offset=0, dim=1, period=1),
+        BusSegment(name="b", offset=1, dim=1, period=1),
+    )
+    u = np.array([1.0, 2.0])
+    outcome = pipeline.tick(u, np.ones(6), dt=0.01, segments=segments)
+    # Первый тик: ошибка по обоим каналам > порога
+    assert outcome.active_tags == ("a", "b")

@@ -4,31 +4,26 @@
 
 1. `src/config/params.py` — `EnergyConfig`, `ColumnParams`, `AttractorConfig`, `HostConfig` ✅
 2. `src/config/__init__.py` — re-exports ✅
-3. `src/config/SPEC.md` — спецификация ✅
-4. `src/tests/test_config.py` — тесты валидации и `build()` ✅
+3. `src/config/SPEC.md` — этот файл ✅
+4. `src/tests/test_config.py` ✅
 
 ## Зависимости
 
-**Внутренние:** `src/core/energy`, `src/core/cmc`, `src/core/attractors`
-(только в `build()`-методах, не в данных).
-
+**Внутренние:** `core/energy`, `core/cmc`, `core/attractors` (в `build()`).
 **Стандартная библиотека:** `dataclasses`.
 
-## Порядок реализации (выполнено)
+## Порядок реализации (S1, выполнено)
 
-1. `EnergyConfig.build()` → `FreeEnergyCalculator`.
-2. `ColumnParams.build(input_dim, state_dim)` → `ColumnConfig`.
-3. `AttractorConfig.build(n_tasks)` → `TaskAttractor`.
-4. `HostConfig` с вложенными конфигами + валидация в `__post_init__`.
-5. Прокинуть в `build_host_loop` (loop.py) и `build_cmc_pipeline` (wiring.py).
-6. Добавить `dominance_threshold` в `TaskAttractor.__init__` (был хардкод-дефолт).
-7. Тесты `test_config.py`.
+1. `EnergyConfig`: человеческие константы (`stress_leak=0.01`, `valence_tau=1.0`).
+2. `HostConfig`: `dt=0.1`, `gamma_max`, `precision_eps`, `time_scale`,
+   пороги дрейфа 100/50.
+3. Проброс в `build_host_loop` (loop.py).
+4. Валидация новых полей.
+5. Тесты.
 
 ## Заметки
 
-- **Размерности из шины**: `ColumnParams.build` вызывается с `bus_dim`,
-  поэтому ширина не хардкодится в конфиге.
-- **Обратная совместимость**: `build_cmc_pipeline` принимает
-  `attractor`/`calculator` опционально — старые вызовы (без конфига) работают.
-- **precision_mode**: значение валидируется в `HostConfig` и в `HostLoop`;
-  `variance` — задел Фазы 2 (BACKLOG `[Phase2][energy]`).
+- **Размерности из шины**: `ColumnParams.build(bus_dim, bus_dim)`.
+- **Обратная совместимость**: `build_cmc_pipeline` принимает attractor/calculator опционально.
+- **Калибровка S1**: `gamma_max=10` (не 1e6), `valence_tau=1.0`, `stress_leak=0.01`.
+- **time_scale**: 1.0 = жизнь, >1 = симуляция (ADR-0006).

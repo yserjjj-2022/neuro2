@@ -69,8 +69,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--precision",
         choices=("ones", "variance"),
-        default="ones",
-        help="Режим точности γ: ones (Фаза 1) или variance (Фаза 2).",
+        default="variance",
+        help="Режим точности γ: variance (S1, 1/var) или ones (baseline).",
+    )
+    parser.add_argument(
+        "--clock-mode",
+        choices=("synthetic", "wall"),
+        default="synthetic",
+        help="Источник времени: synthetic (детерминизм) или wall (реальное).",
+    )
+    parser.add_argument(
+        "--paced",
+        action="store_true",
+        help="Спать между тиками (реальное время ≈ dt).",
     )
     return parser.parse_args(argv)
 
@@ -98,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             message_dim=args.message_dim,
             precision_mode=args.precision,
+            clock_mode=args.clock_mode,
+            paced=args.paced,
             log_path=str(args.log),
         )
     )

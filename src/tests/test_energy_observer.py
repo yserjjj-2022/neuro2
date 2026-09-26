@@ -17,7 +17,7 @@ def test_observer_no_sink(observer: EnergyObserver) -> None:
     error = np.array([1.0])
     precision = np.array([1.0])
 
-    result = observer.observe(error, precision)
+    result = observer.observe(error, precision, dt=0.01)
 
     assert isinstance(result, FreeEnergyResult)
 
@@ -29,25 +29,27 @@ def test_observer_with_sink(observer: EnergyObserver) -> None:
     error = np.array([1.0])
     precision = np.array([1.0])
 
-    observer.observe(error, precision)
+    observer.observe(error, precision, dt=0.01)
 
     assert len(log) == 1
     assert isinstance(log[0], FreeEnergyResult)
 
 
 def test_observer_maintains_state(observer: EnergyObserver) -> None:
-    """Два последовательных observe() корректно передают f(t-1)/stress(t-1)."""
+    """Два последовательных observe() корректно передают состояние."""
     error1 = np.array([1.0])
     precision1 = np.array([1.0])
 
-    result1 = observer.observe(error1, precision1)
+    result1 = observer.observe(error1, precision1, dt=0.01)
 
     error2 = np.array([1.0])
     precision2 = np.array([1.0])
 
-    result2 = observer.observe(error2, precision2)
+    result2 = observer.observe(error2, precision2, dt=0.01)
 
     # Состояние обновлено после второго вызова
-    assert observer._prev_f == result2.f
-    # Поскольку входные данные идентичны, результат должен совпадать
+    assert observer.state.f == result2.f
+    assert observer.state.stress == result2.allostatic_stress
+    assert observer.state.valence == result2.valence
+    # Поскольку входные данные идентичны, F(t) совпадает
     assert result2.f == pytest.approx(result1.f)

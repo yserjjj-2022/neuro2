@@ -22,6 +22,7 @@ def test_energy_to_telemetry_pipeline(tmp_path: Path) -> None:
     observer.observe(
         prediction_error=np.array([0.1, 0.2]),
         precision=np.array([1.0, 1.0]),
+        dt=0.01,
     )
 
     lines = log_path.read_text().strip().split("\n")
@@ -48,6 +49,7 @@ def test_pipeline_multiple_observations(tmp_path: Path) -> None:
         observer.observe(
             prediction_error=np.array([0.5]),
             precision=np.array([2.0]),
+            dt=0.01,
         )
 
     lines = log_path.read_text().strip().split("\n")

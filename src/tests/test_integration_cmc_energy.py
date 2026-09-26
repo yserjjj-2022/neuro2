@@ -11,6 +11,7 @@ import numpy as np
 from src.core.cmc.ensemble import CMCEnsemble
 from src.core.cmc.models import ColumnConfig
 from src.core.energy.calculator import FreeEnergyCalculator
+from src.core.energy.models import EnergyState
 
 
 def test_cmc_energy_convergence() -> None:
@@ -25,17 +26,19 @@ def test_cmc_energy_convergence() -> None:
     calc = FreeEnergyCalculator()
     u = np.array([1.0, 2.0, 3.0, 4.0])
 
-    prev_f = 0.0
-    prev_stress = 0.0
+    state = EnergyState()
     f_history: list[float] = []
 
     for _ in range(100):
         out = ensemble.step(u)
         errors = out.errors.ravel()
         precision = np.ones_like(errors)
-        result = calc.compute(errors, precision, prev_f, prev_stress)
-        prev_f = result.f
-        prev_stress = result.allostatic_stress
+        result = calc.compute(errors, precision, state, dt=0.01)
+        state = EnergyState(
+            f=result.f,
+            stress=result.allostatic_stress,
+            valence=result.valence,
+        )
         f_history.append(result.f)
 
     # F(t) монотонно убывает к 0 по мере сходимости e(t) → 0

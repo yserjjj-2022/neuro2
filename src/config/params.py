@@ -22,13 +22,13 @@ class EnergyConfig:
     """Параметры FreeEnergyCalculator.
 
     Attributes:
-        dt: Шаг интегрирования для валентности (-dF/dt), секунды.
-        stress_decay: Коэффициент затухания аллостатического стресса.
+        stress_leak_per_sec: λ — утечка аллостатического стресса, 1/с.
+        valence_tau: τ — постоянная времени сглаживания валентности, с.
         gamma_base: γ по умолчанию для пустого входа.
     """
 
-    dt: float = 0.01
-    stress_decay: float = 0.99
+    stress_leak_per_sec: float = 0.01
+    valence_tau: float = 1.0
     gamma_base: float = 1.0
 
     def build(self) -> FreeEnergyCalculator:
@@ -38,8 +38,8 @@ class EnergyConfig:
             FreeEnergyCalculator.
         """
         return FreeEnergyCalculator(
-            dt=self.dt,
-            stress_decay=self.stress_decay,
+            stress_leak_per_sec=self.stress_leak_per_sec,
+            valence_tau=self.valence_tau,
             gamma_base=self.gamma_base,
         )
 
@@ -119,26 +119,47 @@ class HostConfig:
     """Полная конфигурация host loop.
 
     Attributes:
-        dt: Шаг интегрирования loop в секундах (0 → без пауз).
+        dt: Шаг интегрирования loop в секундах (> 0). Дефолт 0.1 (10 Гц,
+            эмоциональный контур, ADR-0006).
         max_ticks: Число тиков (0 → бесконечно, до Ctrl+C).
         k: Число победителей k-WTA.
         seed: Зерно детерминированных провайдеров.
         message_dim: Размерность заглушки коммуникативного сигнала.
         active_threshold: Порог активности колонки (‖e‖² > threshold).
-        precision_mode: "ones" (Фаза 1 baseline) или "variance" (Фаза 2).
+        precision_mode: "variance" (γ=1/var) или "ones" (baseline).
+        precision_window: Окно оценки дисперсии, тики.
+        gamma_max: Потолок γ (во сколько раз максимум доверяем каналу).
+        precision_eps: Регуляризация знаменателя γ.
+        clock_mode: "synthetic" (tick·dt) или "wall" (реальное время).
+        paced: Спать между тиками (реальное время ≈ dt).
+        time_scale: Множитель субъективного времени (1.0 = жизнь, >1 = симуляция).
+        tick_budget_ms: Бюджет длительности тика, мс.
+        rss_budget_mb: Бюджет памяти, МБ.
+        drift_f_threshold: Порог F для детектора дрейфа.
+        drift_stress_threshold: Порог стресса для детектора дрейфа.
         log_path: Путь к JSONL-файлу телеметрии.
         columns: Параметры колонок.
         energy: Параметры energy.
         attractor: Параметры аттрактора.
     """
 
-    dt: float = 0.01
+    dt: float = 0.1
     max_ticks: int = 100
     k: int = 2
     seed: int = 0
     message_dim: int = 8
     active_threshold: float = 1e-8
-    precision_mode: str = "ones"
+    precision_mode: str = "variance"
+    precision_window: int = 50
+    gamma_max: float = 10.0
+    precision_eps: float = 1e-6
+    clock_mode: str = "synthetic"
+    paced: bool = False
+    time_scale: float = 1.0
+    tick_budget_ms: float = 50.0
+    rss_budget_mb: float = 1024.0
+    drift_f_threshold: float = 100.0
+    drift_stress_threshold: float = 50.0
     log_path: str = "host_telemetry.jsonl"
     columns: tuple[ColumnParams, ...] = field(
         default_factory=lambda: (
@@ -151,18 +172,36 @@ class HostConfig:
     attractor: AttractorConfig = field(default_factory=AttractorConfig)
 
     def __post_init__(self) -> None:
-        """Валидация: положительные размеры, известный режим precision."""
+        """Валидация: положительные размеры, известные режимы."""
         if self.k < 1:
             raise ValueError(f"k must be >= 1, got {self.k}")
         if self.message_dim <= 0:
             raise ValueError(f"message_dim must be > 0, got {self.message_dim}")
-        if self.dt < 0.0:
-            raise ValueError(f"dt must be >= 0, got {self.dt}")
+        if self.dt <= 0.0:
+            raise ValueError(f"dt must be > 0, got {self.dt}")
         if self.precision_mode not in ("ones", "variance"):
             raise ValueError(
                 f"precision_mode must be 'ones' or 'variance', "
                 f"got {self.precision_mode!r}"
             )
+        if self.precision_window < 1:
+            raise ValueError(
+                f"precision_window must be >= 1, got {self.precision_window}"
+            )
+        if self.gamma_max <= 0.0:
+            raise ValueError(f"gamma_max must be > 0, got {self.gamma_max}")
+        if self.precision_eps <= 0.0:
+            raise ValueError(f"precision_eps must be > 0, got {self.precision_eps}")
+        if self.clock_mode not in ("synthetic", "wall"):
+            raise ValueError(
+                f"clock_mode must be 'synthetic' or 'wall', got {self.clock_mode!r}"
+            )
+        if self.time_scale <= 0.0:
+            raise ValueError(f"time_scale must be > 0, got {self.time_scale}")
+        if self.tick_budget_ms <= 0.0:
+            raise ValueError(f"tick_budget_ms must be > 0, got {self.tick_budget_ms}")
+        if self.rss_budget_mb <= 0.0:
+            raise ValueError(f"rss_budget_mb must be > 0, got {self.rss_budget_mb}")
         if len(self.columns) < self.k:
             raise ValueError(
                 f"k={self.k} exceeds number of columns {len(self.columns)}"

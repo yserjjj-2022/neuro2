@@ -11,6 +11,7 @@
 - [`host_architecture_manifest.md`](host_architecture_manifest.md) — архитектура
 - [`BACKLOG.md`](BACKLOG.md) — задачи по стадиям
 - [`adr/`](adr/) — Architecture Decision Records
+- [`stages/`](stages/) — SPEC/PLAN по стадиям сборки
 
 ## Установка
 

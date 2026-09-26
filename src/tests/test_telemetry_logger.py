@@ -39,13 +39,19 @@ def logger(mock_writer: MockWriter) -> TelemetryLogger:
     )
 
 
-def test_logger_with_mock_writer(logger: TelemetryLogger, mock_writer: MockWriter) -> None:
+def test_logger_with_mock_writer(
+    logger: TelemetryLogger, mock_writer: MockWriter
+) -> None:
     """Logger с mock writer: проверяет вызов write."""
     logger.log(
         free_energy=42.5,
         valence=-1.2,
         allostatic_stress=15.0,
         active_columns=7,
+        tick=3,
+        gamma=2.0,
+        active_tags="cpu,battery",
+        bus_dim=14,
     )
 
     assert mock_writer.write_count == 1
@@ -54,6 +60,10 @@ def test_logger_with_mock_writer(logger: TelemetryLogger, mock_writer: MockWrite
     assert event.valence == -1.2
     assert event.allostatic_stress == 15.0
     assert event.active_columns == 7
+    assert event.tick == 3
+    assert event.gamma == 2.0
+    assert event.active_tags == "cpu,battery"
+    assert event.bus_dim == 14
     assert event.phase == "phase1"
     assert event.mode == "free"
     assert isinstance(event.timestamp, float)
@@ -122,7 +132,9 @@ def test_logger_default_phase_mode() -> None:
     assert event.mode == "free"
 
 
-def test_logger_timestamp_is_wall_clock(logger: TelemetryLogger, mock_writer: MockWriter) -> None:
+def test_logger_timestamp_is_wall_clock(
+    logger: TelemetryLogger, mock_writer: MockWriter
+) -> None:
     """Timestamp — wall-clock time.time(), не монотонный."""
     import time
 

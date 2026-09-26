@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from .models import FreeEnergyResult
+from .models import EnergyState, FreeEnergyResult
 
 logger = logging.getLogger(__name__)
 
@@ -12,26 +12,39 @@ class FreeEnergyCalculator:
 
     Соответствует паттерну Functional Core:
     - Все вычисления — чистые функции без побочных эффектов
-    - Состояние (prev_f, prev_stress) хранится вызывающим кодом
-    - Один и тот же input → один и тот же output без зависимости от порядка вызовов
+    - Состояние (EnergyState) передаётся явно
+    - Один и тот же input → один и тот же output
+
+    Все временные величины — в секундах (S1: единая временная база).
+    ``dt`` передаётся на каждый вызов, калькулятор не хранит шаг.
     """
 
     def __init__(
         self,
-        dt: float = 0.01,
-        stress_decay: float = 0.99,
+        stress_leak_per_sec: float = 1.0,
+        valence_tau: float = 0.1,
         gamma_base: float = 1.0,
     ) -> None:
-        self.dt = dt
-        self.stress_decay = stress_decay
+        """Инициализация калькулятора.
+
+        Args:
+            stress_leak_per_sec: λ — скорость утечки аллостатического
+                стресса, 1/с. Маппинг старого ``stress_decay=0.99`` на тик
+                при 100 Гц: ``λ ≈ 1.0`` 1/с (half-life ≈ 0.69 с).
+            valence_tau: τ — постоянная времени сглаживания валентности, с.
+                Меньше → быстрее реакция, больше → сильнее сглаживание.
+            gamma_base: γ по умолчанию для пустого precision.
+        """
+        self.stress_leak_per_sec = stress_leak_per_sec
+        self.valence_tau = valence_tau
         self.gamma_base = gamma_base
 
     def compute(
         self,
         prediction_error: np.ndarray,
         precision: np.ndarray,
-        prev_f: float,
-        prev_stress: float,
+        state: EnergyState,
+        dt: float,
     ) -> FreeEnergyResult:
         """Рассчитать F(t), valence, stress, gamma.
 
@@ -40,19 +53,22 @@ class FreeEnergyCalculator:
         Args:
             prediction_error: Вектор ошибки предсказания e(t).
             precision: Вектор точности γ для каждого канала.
-            prev_f: Значение F(t-1).
-            prev_stress: Значение allostatic_stress(t-1).
+            state: Предыдущее состояние аффективного контура.
+            dt: Шаг интегрирования в секундах (> 0).
 
         Returns:
             FreeEnergyResult с полями: f, valence, allostatic_stress, gamma.
 
         Raises:
-            ValueError: Если prediction_error.shape != precision.shape.
+            ValueError: Если prediction_error.shape != precision.shape
+                или dt <= 0.
 
         Formula:
             F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
-            valence = -(F(t) - prev_f) / dt
-            stress = prev_stress * stress_decay + F(t)
+            valence_raw = -(F(t) - state.f) / dt
+            a = 1 - exp(-dt / valence_tau)
+            valence = (1 - a)·state.valence + a·valence_raw
+            stress = state.stress · exp(-λ·dt) + F(t)·dt
             gamma = mean(precision) if len(precision) > 0 else gamma_base
 
         Note:
@@ -60,33 +76,46 @@ class FreeEnergyCalculator:
             Пересмотр (min, geometric mean) — Фаза 2.
             precision <= 0 клиппится до 1e-6.
         """
-        # 1. Validate shapes (fail-fast) — catches empty vs non-empty too
+        # 1. Validate dt (fail-fast): единая временная база S1
+        if dt <= 0.0:
+            raise ValueError(f"dt must be > 0, got {dt}")
+
+        # 2. Validate shapes (fail-fast) — catches empty vs non-empty too
         if prediction_error.shape != precision.shape:
             raise ValueError(
                 f"Shape mismatch: prediction_error {prediction_error.shape} "
                 f"!= precision {precision.shape}"
             )
 
-        # 2. Handle empty arrays (if shape check passed, both are empty)
+        # 3. Handle empty arrays (if shape check passed, both are empty)
         if prediction_error.size == 0:
+            valence_raw = -(0.0 - state.f) / dt
+            a = 1.0 - float(np.exp(-dt / self.valence_tau))
             return FreeEnergyResult(
                 f=0.0,
-                valence=-(0.0 - prev_f) / self.dt,
-                allostatic_stress=prev_stress * self.stress_decay,
+                valence=(1.0 - a) * state.valence + a * valence_raw,
+                allostatic_stress=state.stress
+                * float(np.exp(-self.stress_leak_per_sec * dt)),
                 gamma=self.gamma_base,
             )
 
-        # 3. Clip precision (silent clip for Phase 1)
+        # 4. Clip precision (silent clip for Phase 1)
         if np.any(precision <= 0):
             logger.debug("precision clipped")
             precision = np.clip(precision, 1e-6, None)
 
-        # 4. Compute F(t)
-        f = 0.5 * np.sum(precision * prediction_error**2)
+        # 5. Compute F(t)
+        f = float(0.5 * np.sum(precision * prediction_error**2))
 
-        # 5. Compute valence, stress, gamma
-        valence = -(f - prev_f) / self.dt
-        stress = prev_stress * self.stress_decay + f
+        # 6. Valence: raw derivative, exponentially smoothed over time
+        valence_raw = -(f - state.f) / dt
+        a = 1.0 - float(np.exp(-dt / self.valence_tau))
+        valence = (1.0 - a) * state.valence + a * valence_raw
+
+        # 7. Stress: exponential leak + accumulation in seconds
+        stress = state.stress * float(np.exp(-self.stress_leak_per_sec * dt)) + f * dt
+
+        # 8. Gamma: mean precision
         gamma = float(np.mean(precision))
 
         return FreeEnergyResult(

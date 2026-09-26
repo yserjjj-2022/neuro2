@@ -63,6 +63,15 @@ class TelemetryLogger:
         valence: float,
         allostatic_stress: float,
         active_columns: int = 0,
+        *,
+        tick: int = 0,
+        gamma: float = 0.0,
+        active_tags: str = "",
+        reflex_tags: str = "",
+        bus_dim: int = 0,
+        latency_ms: float = 0.0,
+        rss_mb: float = 0.0,
+        drift: bool = False,
     ) -> None:
         """Записать событие в лог.
 
@@ -74,13 +83,29 @@ class TelemetryLogger:
             valence: Валентность.
             allostatic_stress: Аллостатический стресс.
             active_columns: Количество активных колонок.
+            tick: Номер тика хоста.
+            gamma: Precision weighting γ.
+            active_tags: CSV-теги активных каналов шины.
+            reflex_tags: CSV-теги критических сигналов.
+            bus_dim: Ширина шины.
+            latency_ms: Длительность тика, мс.
+            rss_mb: RSS процесса, МБ.
+            drift: Флаг детектора дрейфа.
         """
         event = TelemetryEvent(
             timestamp=time.time(),
+            tick=tick,
             free_energy=free_energy,
             valence=valence,
             allostatic_stress=allostatic_stress,
+            gamma=gamma,
             active_columns=active_columns,
+            active_tags=active_tags,
+            reflex_tags=reflex_tags,
+            bus_dim=bus_dim,
+            latency_ms=latency_ms,
+            rss_mb=rss_mb,
+            drift=drift,
             phase=self.phase,
             mode=self.mode,
         )
@@ -89,7 +114,8 @@ class TelemetryLogger:
         except Exception:  # noqa: BLE001 — crash-safety: не роняем основной цикл
             logger.error(
                 "Telemetry write failed — continuing without log entry: "
-                "free_energy=%.4f, valence=%.4f, stress=%.4f, columns=%d",
+                "tick=%d, free_energy=%.4f, valence=%.4f, stress=%.4f, columns=%d",
+                tick,
                 free_energy,
                 valence,
                 allostatic_stress,

@@ -14,17 +14,31 @@ from src.telemetry.models import TelemetryEvent
 from src.telemetry.writer import TelemetryWriter
 
 
+def _event(**overrides: object) -> TelemetryEvent:
+    base: dict[str, object] = {
+        "timestamp": 1700000000.0,
+        "tick": 0,
+        "free_energy": 42.5,
+        "valence": -1.2,
+        "allostatic_stress": 15.0,
+        "gamma": 1.0,
+        "active_columns": 7,
+        "active_tags": "cpu",
+        "reflex_tags": "",
+        "bus_dim": 14,
+        "latency_ms": 1.5,
+        "rss_mb": 120.0,
+        "drift": False,
+        "phase": "phase1",
+        "mode": "free",
+    }
+    base.update(overrides)
+    return TelemetryEvent(**base)  # type: ignore[arg-type]
+
+
 @pytest.fixture()
 def sample_event() -> TelemetryEvent:
-    return TelemetryEvent(
-        timestamp=1700000000.0,
-        free_energy=42.5,
-        valence=-1.2,
-        allostatic_stress=15.0,
-        active_columns=7,
-        phase="phase1",
-        mode="free",
-    )
+    return _event()
 
 
 def test_write_creates_file(tmp_path: Path, sample_event: TelemetryEvent) -> None:
@@ -48,17 +62,7 @@ def test_write_jsonl_format(tmp_path: Path, sample_event: TelemetryEvent) -> Non
     writer = TelemetryWriter(log_file)
 
     writer.write(sample_event)
-    writer.write(
-        TelemetryEvent(
-            timestamp=1700000001.0,
-            free_energy=43.0,
-            valence=-1.3,
-            allostatic_stress=16.0,
-            active_columns=8,
-            phase="phase1",
-            mode="free",
-        )
-    )
+    writer.write(_event(timestamp=1700000001.0, free_energy=43.0, active_columns=8))
     writer.close()
 
     lines = log_file.read_text(encoding="utf-8").splitlines()

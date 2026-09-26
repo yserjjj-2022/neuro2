@@ -4,7 +4,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .calculator import FreeEnergyCalculator
-from .models import FreeEnergyResult
+from .models import EnergyState, FreeEnergyResult
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +14,8 @@ class EnergyObserver:
 
     Functional Core / Imperative Shell:
     - Core (calculator) — чистая функция, тестируется без I/O
-    - Shell (observer) — инъекция sink, можно мокать в тестах
-    - В проде: sink=lambda r: telemetry_logger.log(r.f, r.valence, r.allostatic_stress)
-      (active_columns=0 по умолчанию до появления src/core/cmc/ в Фазе 3)
+    - Shell (observer) — владеет EnergyState, инъекция sink, мокается в тестах
+    - В проде: sink=lambda r: telemetry_logger.log(...)
     - В тестах: sink = list.append
     """
 
@@ -27,30 +26,37 @@ class EnergyObserver:
     ) -> None:
         self.calculator = calculator
         self.sink = sink
-        self._prev_f: float = 0.0
-        self._prev_stress: float = 0.0
+        self._state: EnergyState = EnergyState()
 
     def observe(
         self,
         prediction_error: np.ndarray,
         precision: np.ndarray,
+        dt: float,
     ) -> FreeEnergyResult:
         """Наблюдать за состоянием: считать метрики, записать через sink.
 
         Args:
             prediction_error: Вектор ошибки предсказания e(t).
             precision: Вектор точности γ.
+            dt: Шаг интегрирования в секундах (> 0).
 
         Returns:
             FreeEnergyResult — сырые метрики без принятия решений.
         """
-        result = self.calculator.compute(
-            prediction_error, precision, self._prev_f, self._prev_stress
+        result = self.calculator.compute(prediction_error, precision, self._state, dt)
+        self._state = EnergyState(
+            f=result.f,
+            stress=result.allostatic_stress,
+            valence=result.valence,
         )
-        self._prev_f = result.f
-        self._prev_stress = result.allostatic_stress
 
         if self.sink is not None:
             self.sink(result)
 
         return result
+
+    @property
+    def state(self) -> EnergyState:
+        """Текущее состояние аффективного контура."""
+        return self._state

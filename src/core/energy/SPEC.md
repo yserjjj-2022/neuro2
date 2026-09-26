@@ -1,195 +1,171 @@
 # SPEC.md — src/core/energy
 
 ## Назначение
-Расчёт свободной энергии F(t), валентности (-dF/dt), аллостатического стресса и precision weighting γ для текущего состояния хоста. Экспортирует сырые метрики как наблюдаемые величины, не принимая решений.
 
-## Публичный интерфейс
+Аффективный контур хоста: свободная энергия F(t), валентность, аллостатический
+стресс, точность γ, а также метакогнитивные guard'ы (контроль целостности,
+детектор дрейфа). Модуль экспортирует наблюдаемые метрики, не принимая решений.
 
-### Формула свободной энергии
+Стадия S1 (`stages/S1_SPEC.md`): единая временная база (секунды), сглаженная
+valence, настоящая γ (обратная дисперсия). Решения — ADR-0006.
+
+См. также:
+- ADR-0004 — FC/IS (`calculator.py` — Core, `observer.py` — Shell)
+- ADR-0006 — перманентное существование и временные шкалы
+- `src/telemetry/SPEC.md` — потребитель метрик
+- `src/host/SPEC.md` — где вызывается (loop)
+
+## Формулы (S1)
 
 ```
-F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
+F(t)         = 0.5 · Σᵢ γᵢ·e(t)ᵢ²                    (пусто → 0.0)
+valence_raw  = -(F(t) - state.f) / dt
+a            = 1 - exp(-dt / valence_tau)
+valence      = (1 - a)·state.valence + a·valence_raw   # EMA по времени
+stress       = state.stress · exp(-λ·dt) + F(t)·dt      # утечка + интеграл
+gamma        = mean(precision)  (пусто → gamma_base)
 ```
 
 где:
-- `e(t)` — вектор ошибки предсказания (prediction_error)
-- `γ` — вектор точности (precision)
-- Сумма по всем элементам вектора
+- `dt` — шаг интегрирования в секундах (> 0), передаётся явно;
+- `valence_tau` (τ) — постоянная времени сглаживания valence, с;
+- `stress_leak_per_sec` (λ) — скорость утечки стресса, 1/с;
+- `γ` — precision (доверие каналу), из `PrecisionEstimator` или baseline.
 
-**Пограничные случаи:**
-- Если `prediction_error.shape != precision.shape` → `ValueError`
-- Если векторы пустые (0 колонок) → `F(t) = 0.0`
-- Если `precision` пустой → `gamma = gamma_base`
-- Если `precision <= 0` → `np.clip(precision, 1e-6, None)` (молчаливый клиппинг)
+Все временные величины — в секундах (единая база, ADR-0006).
 
-### FreeEnergyResult (dataclass)
+## Публичный интерфейс
+
+### FreeEnergyResult (frozen dataclass)
 
 ```python
 @dataclass(frozen=True)
 class FreeEnergyResult:
-    """Результат расчёта свободной энергии."""
-    f: float                    # Свободная энергия F(t) ≥ 0
-    valence: float              # Валентность -dF/dt
-    allostatic_stress: float    # Интеграл F(t) по времени (затухающий)
-    gamma: float                # Precision weighting γ
+    f: float  # F(t) ≥ 0
+    valence: float  # -dF/dt (сглаженная)
+    allostatic_stress: float  # интеграл F(t) с утечкой
+    gamma: float  # агрегат precision
 ```
 
-### FreeEnergyCalculator (fully stateless)
+### EnergyState (frozen dataclass)
+
+```python
+@dataclass(frozen=True)
+class EnergyState:
+    f: float = 0.0  # F(t-1)
+    stress: float = 0.0  # stress(t-1)
+    valence: float = 0.0  # valence(t-1), для EMA
+```
+
+### FreeEnergyCalculator (Core, stateless)
 
 ```python
 class FreeEnergyCalculator:
-    """Чистый калькулятор свободной энергии — полностью stateless.
-    
-    Соответствует паттерну Functional Core:
-    - Все вычисления — чистые функции без побочных эффектов
-    - Состояние (prev_f, prev_stress) хранится вызывающим кодом
-    - Один и тот же input → один и тот же output без зависимости от порядка вызовов
-    """
-    
     def __init__(
         self,
-        dt: float = 0.01,
-        stress_decay: float = 0.99,
+        stress_leak_per_sec: float = 1.0,
+        valence_tau: float = 0.1,
         gamma_base: float = 1.0,
-    ) -> None:
-        """Инициализация калькулятора.
-        
-        Args:
-            dt: Шаг интегрирования (секунды). Параметризуемый.
-            stress_decay: Коэффициент затухания стресса [0, 1). Параметризуемый.
-            gamma_base: Базовое значение precision weighting γ. Параметризуемый.
-        """
-        ...
-    
+    ) -> None: ...
+
     def compute(
         self,
         prediction_error: np.ndarray,
         precision: np.ndarray,
-        prev_f: float,
-        prev_stress: float,
-    ) -> FreeEnergyResult:
-        """Рассчитать F(t), valence, stress, gamma.
-        
-        Чистая функция: не изменяет внутреннее состояние.
-        
-        Args:
-            prediction_error: Вектор ошибки предсказания e(t).
-            precision: Вектор точности γ для каждого канала.
-            prev_f: Значение F(t-1).
-            prev_stress: Значение allostatic_stress(t-1).
-            
-        Returns:
-            FreeEnergyResult с полями: f, valence, stress, gamma.
-            
-        Raises:
-            ValueError: Если prediction_error.shape != precision.shape.
-            
-        Formula:
-            F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
-            valence = -(F(t) - prev_f) / dt
-            stress = prev_stress * stress_decay + F(t)
-            gamma = np.mean(precision) if len(precision) > 0 else gamma_base
-            
-        Note:
-            gamma = mean(precision) — простейшая агрегация для Фазы 1.
-            Пересмотр (min, geometric mean) — Фаза 2.
-            precision <= 0 клиппится до 1e-6.
-        """
-        ...
-    
-    # reset() УДАЛЁН: stateless-архитектура не требует сброса
+        state: EnergyState,
+        dt: float,
+    ) -> FreeEnergyResult: ...
 ```
 
-### EnergyObserver (DI через sink)
+Raises: `ValueError` при `shape mismatch` или `dt <= 0`.
+
+### EnergyObserver (Shell)
 
 ```python
 class EnergyObserver:
-    """Shadow-наблюдатель: логирует F(t) без принятия решений.
-    
-    Functional Core / Imperative Shell:
-    - Core (calculator) — чистая функция, тестируется без I/O
-    - Shell (observer) — инъекция sink, можно мокать в тестах
-    - В проде: sink=lambda r: telemetry_logger.log(r.f, r.valence, r.allostatic_stress)
-      (active_columns=0 по умолчанию до появления src/core/cmc/ в Фазе 3)
-    - В тестах: sink = list.append
-    """
-    
     def __init__(
         self,
         calculator: FreeEnergyCalculator,
         sink: Callable[[FreeEnergyResult], None] | None = None,
-    ) -> None:
-        """
-        Args:
-            calculator: Calculator для расчёта метрик.
-            sink: Необязательная функция записи. Если None — observe() 
-                  возвращает результат без записи.
-        """
-        ...
-    
-    def observe(
-        self,
-        prediction_error: np.ndarray,
-        precision: np.ndarray,
-    ) -> FreeEnergyResult:
-        """Наблюдать за состоянием: считать метрики, записать через sink.
-        
-        Args:
-            prediction_error: Вектор ошибки предсказания e(t).
-            precision: Вектор точности γ.
-            
-        Returns:
-            FreeEnergyResult — сырые метрики без принятия решений.
-        """
-        ...
+    ) -> None: ...
+
+    def observe(self, prediction_error, precision, dt) -> FreeEnergyResult: ...
+
+    @property
+    def state(self) -> EnergyState: ...
+```
+
+Владеет `EnergyState`; sink — DI (в проде loop логирует сам, observer.sink=None).
+
+### PrecisionEstimator (Shell) + inverse_variance (Core)
+
+```python
+def inverse_variance(samples, eps=1e-6, gamma_max=10.0) -> Vector:
+    """γ = clip(1/(var+eps), 0, gamma_max)."""
+
+
+class PrecisionEstimator:
+    def __init__(self, dim, window=50, eps=1e-6, gamma_max=10.0) -> None: ...
+    def update(self, u: Vector) -> Vector: ...
+    @property
+    def count(self) -> int: ...
+    def reset(self) -> None: ...
+```
+
+`gamma_max=10.0` — «во сколько раз максимум доверяем каналу». 1e6 вызывал
+взрыв F/stress (см. S1 SPEC).
+
+### Guards
+
+```python
+class HostIntegrityError(RuntimeError): ...
+
+
+def check_finite(result: FreeEnergyResult) -> None:
+    """Raises HostIntegrityError при NaN/inf в f/valence/stress/gamma."""
+```
+
+### DriftDetector (заготовка S1)
+
+```python
+class DriftDetector:
+    def __init__(self, f_threshold, stress_threshold, hold_ticks=20) -> None: ...
+    def update(self, result: FreeEnergyResult) -> bool: ...
+    @property
+    def streak(self) -> int: ...
+    def reset(self) -> None: ...
 ```
 
 ## Инварианты
 
-1. **F(t) ≥ 0**: свободная энергия всегда неотрицательная (KL-дивергенция, квадратичная форма).
-2. **Valence = -dF/dt**: валентность — производная F(t) со знаком минус.
-3. **Stress монотонно затухает**: если F(t) = 0, stress не растёт (stress_decay < 1).
-4. **γ > 0**: precision weighting всегда положительное (clip до 1e-6 при <= 0).
-5. **Non-blocking**: `compute()` выполняется быстро (< 10 мс на батче ≤1000 колонок).
-6. **Fully stateless**: `FreeEnergyCalculator.compute()` не изменяет внутреннее состояние. Все временные переменные (prev_f, prev_stress) передаются явно.
-7. **Shape validation**: `ValueError` при несовпадении размерностей prediction_error и precision.
+1. **F(t) ≥ 0** (квадратичная форма).
+2. **valence** — сглажена по времени; на стабильном входе не дребезжит.
+3. **stress** — утечка + интеграл `F·dt` (зависит от секунд, не тиков).
+4. **γ > 0** всегда; клип до 1e-6 при precision ≤ 0.
+5. **dt > 0** — fail-fast.
+6. **Non-finite → HostIntegrityError** (не тихое продолжение).
+7. **Fully stateless calculator**: всё состояние — в `EnergyState`.
+8. **Non-blocking**: compute() быстро на батче ≤ 1000 колонок.
 
-## Критерии приёмки
+## Критерии приёмки (S1)
 
-- [ ] `FreeEnergyCalculator.compute()` — полностью stateless, prev_stress — явный параметр
-- [ ] Формула F(t) = 0.5 · Σ γᵢ · e(t)ᵢ² реализована верно
-- [ ] `ValueError` при несовпадении размерностей prediction_error и precision
-- [ ] Пустые векторы → F(t) = 0.0
-- [ ] Пустой precision → gamma = gamma_base
-- [ ] precision <= 0 → клиппится до 1e-6 (не nan, не inf)
-- [ ] `valence` корректно рассчитывается как `-(f - prev_f) / dt`
-- [ ] `allostatic_stress` монотонно затухает при F(t) = 0
-- [ ] `gamma` всегда > 0
-- [ ] `EnergyObserver` тестируется без файловой системы (sink=list.append)
-- [ ] Минимум 5 unit-теста: F(t) formula, shape validation, empty arrays, stress decay, valence sign
-- [ ] `ruff check` и `ruff format` проходят без ошибок
-- [ ] mypy strict не ругается
-
-## Явно НЕ входит в скоуп
-
-- **Принятие решений**: нет вызова LLM, нет изменения поведения
-- **Калибровка порога**: F(t) threshold — отдельная задача Фазы 2
-- **Связь с колонками**: нет прямого доступа к CMC, только через e(t) и γ
-- **Визуализация**: нет графиков, нет dashboard
-- **Structure Learning**: нет обобщения паттернов, нет schemas
-- **Ночной сон**: нет active pruning, нет consolidation
+- [x] `compute()` — stateless, `dt` явный, `EnergyState` явный
+- [x] valence сглажена (`a = 1-exp(-dt/τ)`)
+- [x] stress — экспоненциальная утечка + `f·dt`
+- [x] `dt <= 0` → ValueError
+- [x] `inverse_variance` — чистая, `gamma_max` клип
+- [x] `PrecisionEstimator` — окно наблюдений
+- [x] `check_finite` → HostIntegrityError
+- [x] `DriftDetector` — порог + hold
+- [x] 286 тестов, ruff чист
 
 ## Open Questions
 
 | Вопрос | Статус | Решение |
-|--------|--------|---------|
-| **Порог F(t) для event-triggered вызова LLM** | **Отложен до Фазы 2** | **В Фазе 1: EnergyObserver в shadow mode — только логирует, ничего не триггерит. Калибровка порога по перцентилю — Фаза 2, после сбора статистики.** |
-| Формула stress decay | Решено | `stress = prev_stress * stress_decay + F(t)` (затухающий интеграл) |
-| Инициализация F(0), stress(0) | Решено | `F(0) = 0`, `stress(0) = 0` (система начинается с нуля) |
-| Batch size для SIMD | Отложен | Фаза 3: батчинг колонок, пока одна колонка |
-| gamma агрегация | Решено | `mean(precision)` — простейшая для Фазы 1. `min` или `geometric mean` — Фаза 2 |
-
-## Implementation Notes
-
-1. **Clip order**: `precision` must be clipped *before* calculating F(t) and gamma.
-2. **Debug logging**: Add `logger.debug("precision clipped")` when clipping occurs (for Phase 2 debugging).
+|---|---|---|
+| `stress_leak_per_sec` | Решено | 0.01/с (настроение, минуты) |
+| `valence_tau` | Решено | 1.0 с (эмоция) |
+| `gamma_max` | Решено | 10.0 |
+| `gamma_base` | Решено | 1.0 |
+| Пороги дрейфа | Решено | 100 / 50 (в HostConfig) |
+| γ пред-колоночно | Отложено | S4 (ADR-0005 §2) |

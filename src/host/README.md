@@ -2,10 +2,11 @@
 
 Обвязка хоста: связывает модули в работающую систему и оживляет её во времени.
 
-- `wiring.py` — сборка per-tick конвейера: cmc → voting/attractors → energy
-  → telemetry. Единственное место, знающее конкретные поля `FreeEnergyResult`.
-- `sources.py` — сенсорная шина: провайдеры сигналов (mock/real) → `u(t)`,
-  карта сегментов шины (фундамент width scaling), медленный такт.
-- `loop.py` — `HostLoop`: цикл по `dt`, precision, graceful shutdown.
+- `sources.py` — сенсорная шина: провайдеры сигналов → `u(t)`, карта сегментов.
+- `resources.py` — `ResourceMeter`/`ResourceProvider` (интероцепция ресурсов).
+- `wiring.py` — чистая композиция `CMCPipeline` → `TickOutcome` (без I/O).
+- `loop.py` — `HostLoop`: время (synthetic/wall, time_scale), precision,
+  ресурсы, guard, drift, телеметрия.
 
-См. `SPEC.md` и `PLAN.md`. Точка входа: `uv run python -m src`.
+S1: телеметрия переехала в loop; шина 14 каналов; человеческий темп (10 Гц).
+См. `SPEC.md`, `PLAN.md` и ADR-0006. Точка входа: `uv run python -m src`.

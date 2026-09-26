@@ -18,9 +18,11 @@ class TestEnergyConfig:
         assert isinstance(calc, FreeEnergyCalculator)
 
     def test_values_propagate(self) -> None:
-        calc = EnergyConfig(dt=0.05, stress_decay=0.9, gamma_base=2.0).build()
-        assert calc.dt == 0.05
-        assert calc.stress_decay == 0.9
+        calc = EnergyConfig(
+            stress_leak_per_sec=0.5, valence_tau=0.2, gamma_base=2.0
+        ).build()
+        assert calc.stress_leak_per_sec == 0.5
+        assert calc.valence_tau == 0.2
         assert calc.gamma_base == 2.0
 
 
@@ -56,9 +58,26 @@ class TestHostConfig:
     def test_defaults(self) -> None:
         config = HostConfig()
         assert config.k == 2
-        assert config.dt == 0.01
-        assert config.precision_mode == "ones"
+        assert config.dt == 0.1
+        assert config.precision_mode == "variance"
+        assert config.clock_mode == "synthetic"
+        assert config.gamma_max == 10.0
+        assert config.time_scale == 1.0
         assert len(config.columns) == 3
+
+    def test_invalid_clock_mode_raises(self) -> None:
+        with pytest.raises(ValueError):
+            HostConfig(clock_mode="bogus")
+
+    def test_invalid_precision_window_raises(self) -> None:
+        with pytest.raises(ValueError):
+            HostConfig(precision_window=0)
+
+    def test_invalid_budgets_raise(self) -> None:
+        with pytest.raises(ValueError):
+            HostConfig(tick_budget_ms=0.0)
+        with pytest.raises(ValueError):
+            HostConfig(rss_budget_mb=-1.0)
 
     def test_invalid_k_raises(self) -> None:
         with pytest.raises(ValueError):
