@@ -389,27 +389,36 @@ def default_providers(
     message_dim: int = 8,
     seed: int = 0,
     resource_provider: SignalProvider | None = None,
+    message_provider: SignalProvider | None = None,
 ) -> list[SignalProvider]:
     """Стандартный набор источников для host loop.
 
-    Состав: circadian(2) + battery(1) + cpu(1) + user_message(message_dim)
-    + resources(2, если передан). Итоговая ширина шины: 6 + message_dim
-    при наличии ресурсного провайдера (по умолчанию 14).
+    Состав: circadian(2) + battery(1) + cpu(1) + message + resources(2, если
+    передан). Итоговая ширина шины: 6 + message_dim при наличии ресурсного
+    провайдера (по умолчанию 14).
+
+    ``message_provider`` (S2: ``TextMessageProvider`` с эмбеддером) заменяет
+    вектор-заглушку ``UserMessageProvider`` без смены интерфейса.
 
     Args:
-        message_dim: Размерность заглушки сообщения (embedding_dim).
+        message_dim: Размерность заглушки сообщения (если message_provider
+            не передан).
         seed: Зерно детерминированных генераторов (cpu, message).
         resource_provider: Ресурсный провайдер (инъекция meter).
             None → ресурсный канал не добавляется (шина 12).
+        message_provider: Готовый коммуникативный провайдер (S2).
+            None → ``UserMessageProvider(message_dim)`` (заглушка).
 
     Returns:
         Список провайдеров в порядке укладки на шину.
     """
+    if message_provider is None:
+        message_provider = UserMessageProvider(embedding_dim=message_dim, seed=seed)
     providers: list[SignalProvider] = [
         CircadianProvider(),
         BatteryProvider(),
         CpuProvider(seed=seed),
-        UserMessageProvider(embedding_dim=message_dim, seed=seed),
+        message_provider,
     ]
     if resource_provider is not None:
         providers.append(resource_provider)

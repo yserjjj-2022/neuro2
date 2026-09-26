@@ -32,6 +32,4 @@ class SupportsRecall(Protocol):
         MemoryStoreError: При сбое I/O.
     """
 
-    def recall(
-        self, query_embedding: Vector, limit: int = 5
-    ) -> list[Episode]: ...
+    def recall(self, query_embedding: Vector, limit: int = 5) -> list[Episode]: ...

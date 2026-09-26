@@ -13,17 +13,26 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 
 См. ADR-0006 (временные шкалы), `stages/S1_SPEC.md`.
 
-## Поток одного тика (S1)
+## Поток одного тика (S2)
 
 ```
 dt, now = time source (synthetic: tick·tick_dt·time_scale; wall: measured)
-u(t)    = SignalBus.step(tick, now)
+u_base  = SignalBus.step(tick, now)
+text    = message_provider.text_at(tick)      # S2: коммуникативный вход
+query   = memory.context_embedding(text)       # S2 (кэш)
+prior   = memory.recall_prior(query)           # S2
+u       = concat(u_base, prior)                # S2: total_dim = bus_dim + prior_dim
 γ       = PrecisionEstimator.update(u)  (variance) или ones (baseline)
 outcome = pipeline.tick(u, γ, dt, segments, reflex_tags)
 check_finite(outcome.result)            # HostIntegrityError при NaN/inf
 drift   = DriftDetector.update(outcome.result)
+stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
 telemetry.log(...)                      # loop владеет writer'ом
 ```
+
+`memory=None` / `MemoryConfig(enabled=False)` → контур S1 (prior не
+добавляется, `total_dim == bus_dim`). Сегмент памяти:
+`BusSegment("memory", offset=bus_dim, dim=prior_dim, period=1)`.
 
 ## Провайдеры (sources.py)
 
@@ -70,6 +79,7 @@ class TickOutcome:
     active_tags: tuple[str, ...]
     reflex_tags: tuple[str, ...]
 
+
 @dataclass(frozen=True)
 class CMCPipeline:
     ensemble: CMCEnsemble
@@ -92,6 +102,7 @@ class ResourceMeter:
     def last_rss_mb(self) -> float: ...
     @staticmethod
     def current_rss_mb() -> float: ...
+
 
 @dataclass(frozen=True)
 class ResourceProvider:

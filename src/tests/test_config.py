@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import AttractorConfig, ColumnParams, EnergyConfig, HostConfig
+from src.config import (
+    AttractorConfig,
+    ColumnParams,
+    EnergyConfig,
+    HostConfig,
+    MemoryConfig,
+)
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
 from src.core.energy import FreeEnergyCalculator
@@ -83,10 +89,6 @@ class TestHostConfig:
         with pytest.raises(ValueError):
             HostConfig(k=0)
 
-    def test_invalid_message_dim_raises(self) -> None:
-        with pytest.raises(ValueError):
-            HostConfig(message_dim=0)
-
     def test_negative_dt_raises(self) -> None:
         with pytest.raises(ValueError):
             HostConfig(dt=-0.1)
@@ -98,3 +100,38 @@ class TestHostConfig:
     def test_k_exceeds_columns_raises(self) -> None:
         with pytest.raises(ValueError):
             HostConfig(k=5)
+
+
+class TestMemoryConfig:
+    """MemoryConfig: дефолты и валидация (S2)."""
+
+    def test_defaults(self) -> None:
+        cfg = MemoryConfig()
+        assert cfg.enabled is True
+        assert cfg.embedder_mode == "auto"
+        assert cfg.embedding_dim == 8
+        assert cfg.prior_dim == 4
+        assert cfg.recall_limit == 1
+
+    def test_invalid_embedder_mode_raises(self) -> None:
+        with pytest.raises(ValueError):
+            MemoryConfig(embedder_mode="nope")
+
+    def test_invalid_embedding_dim_raises(self) -> None:
+        with pytest.raises(ValueError):
+            MemoryConfig(embedding_dim=0)
+
+    def test_invalid_prior_dim_raises(self) -> None:
+        with pytest.raises(ValueError):
+            MemoryConfig(prior_dim=0)
+
+    def test_invalid_recall_limit_raises(self) -> None:
+        with pytest.raises(ValueError):
+            MemoryConfig(recall_limit=0)
+
+    def test_negative_spike_threshold_raises(self) -> None:
+        with pytest.raises(ValueError):
+            MemoryConfig(episode_spike_threshold=-1.0)
+
+    def test_host_config_has_memory(self) -> None:
+        assert isinstance(HostConfig().memory, MemoryConfig)

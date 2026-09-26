@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.config import HostConfig
+from src.config import HostConfig, MemoryConfig
 from src.core.cmc import ColumnConfig
 from src.core.energy import DriftDetector, PrecisionEstimator
 from src.host.loop import HostLoop, build_host_loop
@@ -74,6 +74,8 @@ def behavioral_fingerprint(
         "valence_sign_changes": float(sign_changes),
         "reflex_events": float(reflex_events),
         "drift_events": float(sum(1 for e in events if e["drift"])),
+        "memory_hits": float(sum(1 for e in events if e.get("memory_hit"))),
+        "episodes_stored": float(sum(1 for e in events if e.get("episode_stored"))),
         "latency_p50_ms": float(np.percentile(latency_values, 50)),
         "latency_p95_ms": float(np.percentile(latency_values, 95)),
     }
@@ -199,7 +201,10 @@ class TestCanonicalScenarios:
 
     def test_c5_default_bus_stability(self, tmp_path: Path) -> None:
         """C5: дефолтный набор → N тиков → N событий, без shape mismatch."""
-        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
         loop = build_host_loop(config)
         executed = loop.run(50)
         loop.close()
@@ -211,7 +216,10 @@ class TestCanonicalScenarios:
 
     def test_c6_resource_signal_in_log(self, tmp_path: Path) -> None:
         """C6: ресурсный сигнал измеряется и логируется (latency/rss)."""
-        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
         loop = build_host_loop(config, meter=FakeMeter())
         loop.run(20)
         loop.close()
@@ -223,6 +231,38 @@ class TestCanonicalScenarios:
         assert all(e["latency_ms"] >= 0.0 for e in events)
         assert all(e["rss_mb"] > 0.0 for e in events)
         assert all(e["bus_dim"] == 14 for e in events)
+
+    def test_c11_memory_store_and_recall(self, tmp_path: Path) -> None:
+        """C11 (S2): эпизоды пишутся на значимых событиях; recall находит.
+
+        Сценарий: стабильный текст + скачок входа → всплеск F → эпизод
+        записан. Затем повторный прогон на той же БД → recall находит эпизод
+        (memory_hit) по тому же тексту.
+        """
+        db = tmp_path / "mem.db"
+        messages = ((0, "the cat sat on the mat"),)
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(db), episode_spike_threshold=0.5),
+        )
+        loop = build_host_loop(config, meter=FakeMeter(), messages=messages)
+        loop.run(200)
+        loop.close()
+
+        events = _events(tmp_path)
+        assert any(e["episode_stored"] for e in events), "no episode stored on spike"
+
+        # Повторный прогон на той же БД: recall должен найти эпизод
+        log2 = tmp_path / "run2.jsonl"
+        config2 = HostConfig(
+            log_path=str(log2),
+            memory=MemoryConfig(db_path=str(db), episode_spike_threshold=0.5),
+        )
+        loop2 = build_host_loop(config2, meter=FakeMeter(), messages=messages)
+        loop2.run(200)
+        loop2.close()
+        events2 = [json.loads(line) for line in log2.read_text().strip().split("\n")]
+        assert any(e["memory_hit"] for e in events2), "recall found nothing"
 
 
 class TestOrganismInvariants:
@@ -245,13 +285,19 @@ class TestOrganismInvariants:
         assert fp["valence_sign_changes"] <= 5
 
     def test_determinism_synthetic(self, tmp_path: Path) -> None:
-        """§2.8: synthetic clock + fake meter → детерминированный replay."""
-        config_a = HostConfig(log_path=str(tmp_path / "a" / "run.jsonl"))
+        """§2.8: synthetic clock + fake meter + fresh DB → replay."""
+        config_a = HostConfig(
+            log_path=str(tmp_path / "a" / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "a" / "mem.db")),
+        )
         loop_a = build_host_loop(config_a, meter=FakeMeter())
         loop_a.run(30)
         loop_a.close()
 
-        config_b = HostConfig(log_path=str(tmp_path / "b" / "run.jsonl"))
+        config_b = HostConfig(
+            log_path=str(tmp_path / "b" / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "b" / "mem.db")),
+        )
         loop_b = build_host_loop(config_b, meter=FakeMeter())
         loop_b.run(30)
         loop_b.close()

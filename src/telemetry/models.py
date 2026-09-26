@@ -29,6 +29,9 @@ class TelemetryEvent:
         latency_ms: Длительность тика, мс.
         rss_mb: RSS процесса, МБ.
         drift: Флаг детектора дрейфа (заготовка S1).
+        memory_prior: Косинус извлечённого эпизода (0.0 если нет) — S2.
+        memory_hit: Recall нашёл релевантный эпизод — S2.
+        episode_stored: Эпизод записан на этом тике — S2.
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
     """
@@ -46,5 +49,8 @@ class TelemetryEvent:
     latency_ms: float
     rss_mb: float
     drift: bool
+    memory_prior: float
+    memory_hit: bool
+    episode_stored: bool
     phase: str
     mode: str

@@ -10,24 +10,27 @@ reflex, ресурсы, drift.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 15 полей)
+### TelemetryEvent (frozen dataclass, 18 полей)
 
 ```python
 @dataclass(frozen=True)
 class TelemetryEvent:
-    timestamp: float        # time.time()
-    tick: int               # номер тика (S1)
+    timestamp: float  # time.time()
+    tick: int  # номер тика (S1)
     free_energy: float
     valence: float
     allostatic_stress: float
-    gamma: float            # агрегат precision (S1)
+    gamma: float  # агрегат precision (S1)
     active_columns: int
-    active_tags: str        # CSV активных каналов шины (S1)
-    reflex_tags: str        # CSV критических сигналов (S1)
-    bus_dim: int            # ширина шины (S1)
-    latency_ms: float       # длительность тика, мс (S1)
-    rss_mb: float           # RSS процесса, МБ (S1)
-    drift: bool             # флаг детектора дрейфа (S1)
+    active_tags: str  # CSV активных каналов шины (S1)
+    reflex_tags: str  # CSV критических сигналов (S1)
+    bus_dim: int  # ширина шины (S1)
+    latency_ms: float  # длительность тика, мс (S1)
+    rss_mb: float  # RSS процесса, МБ (S1)
+    drift: bool  # флаг детектора дрейфа (S1)
+    memory_prior: float  # cos извлечённого эпизода (S2)
+    memory_hit: bool  # recall нашёл эпизод (S2)
+    episode_stored: bool  # эпизод записан на тике (S2)
     phase: str
     mode: str
 ```
@@ -53,11 +56,27 @@ class TelemetryWriter:
 ```python
 class TelemetryLogger:
     def __init__(self, writer: SupportsWrite, phase="phase1", mode="free") -> None: ...
-    def log(
-        self, free_energy, valence, allostatic_stress, active_columns=0,
-        *, tick=0, gamma=0.0, active_tags="", reflex_tags="",
-        bus_dim=0, latency_ms=0.0, rss_mb=0.0, drift=False,
-    ) -> None: ...
+
+
+def log(
+    self,
+    free_energy,
+    valence,
+    allostatic_stress,
+    active_columns=0,
+    *,
+    tick=0,
+    gamma=0.0,
+    active_tags="",
+    reflex_tags="",
+    bus_dim=0,
+    latency_ms=0.0,
+    rss_mb=0.0,
+    drift=False,
+    memory_prior=0.0,
+    memory_hit=False,
+    episode_stored=False,
+) -> None: ...
 ```
 
 Новые поля — keyword-only с дефолтами (обратная совместимость).
@@ -70,9 +89,9 @@ class TelemetryLogger:
 4. **Flush после записи** (crash-safety).
 5. **DI через Protocol** `SupportsWrite`.
 
-## Критерии приёмки (S1)
+## Критерии приёмки (S1+S2)
 
-- [x] `TelemetryEvent` — 15 полей, все типизированы
+- [x] `TelemetryEvent` — 18 полей, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)

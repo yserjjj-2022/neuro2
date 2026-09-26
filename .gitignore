@@ -20,3 +20,10 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime artifacts
+*.jsonl
+*.db
+*.db-wal
+*.db-shm
+.host_clock

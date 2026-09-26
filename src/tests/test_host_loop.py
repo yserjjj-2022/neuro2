@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.config import HostConfig
+from src.config import HostConfig, MemoryConfig
 from src.core.cmc import ColumnConfig
 from src.core.energy import DriftDetector, PrecisionEstimator
 from src.host.loop import HostLoop, build_host_loop
@@ -149,7 +149,10 @@ class TestHostLoopExperiment:
 
     def test_exp5_default_bus_n_ticks(self, tmp_path: Path) -> None:
         """#5: дефолтный набор → N тиков → N событий в JSONL."""
-        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
         loop = build_host_loop(config)
         executed = loop.run(20)
         loop.close()
@@ -158,6 +161,7 @@ class TestHostLoopExperiment:
         events = _read_events(tmp_path)
         assert len(events) == 20
         assert loop.bus.bus_dim == 14  # +2 ресурсных канала
+        assert loop.total_dim == 18  # +4 приор памяти
         assert events[0]["active_columns"] == 3
         assert events[0]["tick"] == 0
         assert events[19]["tick"] == 19
@@ -183,10 +187,13 @@ class TestHostLoopMechanics:
         assert loop.precision(u).shape == (2 * 2,)
 
     def test_precision_shape_default(self, tmp_path: Path) -> None:
-        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
         loop = build_host_loop(config)
-        u = np.zeros(loop.bus.bus_dim)
-        assert loop.precision(u).shape == (3 * 14,)
+        u = np.zeros(loop.total_dim)
+        assert loop.precision(u).shape == (3 * 18,)
 
     def test_invalid_precision_mode_raises(self) -> None:
         with pytest.raises(ValueError):

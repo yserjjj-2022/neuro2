@@ -29,6 +29,9 @@ def _event(**overrides: object) -> TelemetryEvent:
         "latency_ms": 1.5,
         "rss_mb": 120.0,
         "drift": False,
+        "memory_prior": 0.0,
+        "memory_hit": False,
+        "episode_stored": False,
         "phase": "phase1",
         "mode": "free",
     }

@@ -33,6 +33,19 @@
 | `convergence_threshold` | 1e-8 |
 | `dominance_threshold` | 0.3 |
 
+### MemoryConfig (S2) → эмбеддер + MemoryStore + MemoryRouter
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | True | Включить память в loop |
+| `embedder_mode` | "auto" | auto (ключ→api, иначе fake), fake, api |
+| `embedding_dim` | 8 | Размерность fake-эмбеддера / коммуникативного входа |
+| `embedding_model` | "text-embedding-3-small" | Модель API |
+| `db_path` | "host_memory.db" | Файл БД памяти |
+| `episode_spike_threshold` | 1.0 | Порог всплеска F для эпизода |
+| `recall_limit` | 1 | Сколько эпизодов извлекать |
+| `prior_dim` | 4 | Размерность приора в шине |
+
 ### HostConfig
 
 | Поле | Дефолт | Смысл |
@@ -41,7 +54,6 @@
 | `max_ticks` | 100 | 0 → бесконечно |
 | `k` | 2 | победители k-WTA |
 | `seed` | 0 | зерно провайдеров |
-| `message_dim` | 8 | заглушка сообщения |
 | `active_threshold` | 1e-8 | порог активности |
 | `precision_mode` | "variance" | γ=1/var или "ones" |
 | `precision_window` | 50 | окно дисперсии |
@@ -58,13 +70,16 @@
 | `columns` | 3 (tone/rhythm/meaning) | колонки |
 | `energy` | EnergyConfig() | energy |
 | `attractor` | AttractorConfig() | аттрактор |
+| `memory` | MemoryConfig() | память + эмбеддер |
 
 ## Инварианты
 
-1. Валидация fail-fast: `k<1`, `message_dim<=0`, `dt<=0`,
+1. Валидация fail-fast: `k<1`, `dt<=0`,
    `precision_mode∉{ones,variance}`, `precision_window<1`, `gamma_max<=0`,
    `precision_eps<=0`, `clock_mode∉{synthetic,wall}`, `time_scale<=0`,
    бюджеты ≤0, `len(columns)<k` → ValueError.
+   `MemoryConfig`: `embedder_mode∉{auto,fake,api}`, `embedding_dim<=0`,
+   `prior_dim<=0`, `recall_limit<1`, `episode_spike_threshold<0` → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 

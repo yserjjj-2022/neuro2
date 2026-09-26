@@ -106,6 +106,8 @@ class MemoryStore:
     def _open(self) -> None:
         """Открыть соединение, загрузить sqlite-vec, создать схему."""
         try:
+            if str(self.db_path) != ":memory:":
+                self.db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(self.db_path))
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)

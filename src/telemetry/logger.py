@@ -72,6 +72,9 @@ class TelemetryLogger:
         latency_ms: float = 0.0,
         rss_mb: float = 0.0,
         drift: bool = False,
+        memory_prior: float = 0.0,
+        memory_hit: bool = False,
+        episode_stored: bool = False,
     ) -> None:
         """Записать событие в лог.
 
@@ -91,6 +94,9 @@ class TelemetryLogger:
             latency_ms: Длительность тика, мс.
             rss_mb: RSS процесса, МБ.
             drift: Флаг детектора дрейфа.
+            memory_prior: Косинус извлечённого эпизода (S2).
+            memory_hit: Recall нашёл релевантный эпизод (S2).
+            episode_stored: Эпизод записан на этом тике (S2).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -106,6 +112,9 @@ class TelemetryLogger:
             latency_ms=latency_ms,
             rss_mb=rss_mb,
             drift=drift,
+            memory_prior=memory_prior,
+            memory_hit=memory_hit,
+            episode_stored=episode_stored,
             phase=self.phase,
             mode=self.mode,
         )

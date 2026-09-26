@@ -29,6 +29,9 @@ def _event(**overrides: object) -> TelemetryEvent:
         "latency_ms": 1.5,
         "rss_mb": 120.0,
         "drift": False,
+        "memory_prior": 0.0,
+        "memory_hit": False,
+        "episode_stored": False,
         "phase": "phase1",
         "mode": "free",
     }
@@ -48,7 +51,7 @@ def test_serialize_valid(tmp_path: object) -> None:
 
 
 def test_serialize_all_s1_fields() -> None:
-    """S1: все 15 полей присутствуют в JSON."""
+    """S2: все 18 полей присутствуют в JSON."""
     data = json.loads(
         serialize_event(_event(tick=7, gamma=2.5, active_tags="cpu,battery"))
     )
@@ -66,6 +69,9 @@ def test_serialize_all_s1_fields() -> None:
         "latency_ms",
         "rss_mb",
         "drift",
+        "memory_prior",
+        "memory_hit",
+        "episode_stored",
         "phase",
         "mode",
     ):
@@ -73,6 +79,16 @@ def test_serialize_all_s1_fields() -> None:
     assert data["tick"] == 7
     assert data["gamma"] == 2.5
     assert data["active_tags"] == "cpu,battery"
+
+
+def test_serialize_memory_fields() -> None:
+    """S2: поля памяти сериализуются корректно."""
+    data = json.loads(
+        serialize_event(_event(memory_prior=0.75, memory_hit=True, episode_stored=True))
+    )
+    assert data["memory_prior"] == 0.75
+    assert data["memory_hit"] is True
+    assert data["episode_stored"] is True
 
 
 def test_serialize_nan_raises() -> None:

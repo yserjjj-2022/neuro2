@@ -1,12 +1,17 @@
 """Host loop — the beating heart of the host.
 
-Each tick (S1, single time base):
+Each tick (S2, memory wired in):
     dt, now = time source (synthetic: tick·tick_dt; wall: measured)
-    u(t)    = SignalBus.step(tick, now)
+    u_base  = SignalBus.step(tick, now)
+    text    = message_provider.text_at(tick)     (S2)
+    query   = memory.context_embedding(text)      (S2, cached)
+    prior   = memory.recall_prior(query)          (S2)
+    u       = concat(u_base, prior)               (S2)
     γ       = PrecisionEstimator.update(u)  (or ones baseline)
     outcome = pipeline.tick(u, γ, dt, segments, reflex_tags)
     guard   = check_finite(outcome.result)
     drift   = DriftDetector.update(outcome.result)
+    stored  = memory.maybe_store(...)             (S2)
     telemetry.log(...)  (loop owns the writer — it has the full context)
 
 The loop owns the clock and telemetry. ``clock_mode="synthetic"`` (default)
@@ -25,8 +30,14 @@ import numpy as np
 from src.config import HostConfig
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
 from src.host.resources import ResourceMeter, ResourceProvider
-from src.host.sources import SignalBus, default_providers
+from src.host.sources import BusSegment, SignalBus, default_providers
+from src.host.text_source import TextMessageProvider
 from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
+from src.memory import (
+    MemoryRouter,
+    MemoryStore,
+    build_embedder,
+)
 from src.telemetry import TelemetryLogger, TelemetryWriter
 
 
@@ -45,6 +56,9 @@ class HostLoop:
         clock_mode: "synthetic" (tick·tick_dt) или "wall" (реальное время).
         paced: Спать между тиками, чтобы реальное время ≈ tick_dt.
         precision_mode: "variance" (γ=1/var) или "ones" (baseline).
+        time_scale: Множитель субъективного времени.
+        memory: Роутер памяти (S2); None → контур без памяти (S1).
+        message_provider: Коммуникативный вход (S2); None → нет текста.
         clock: Источник wall-clock (инъекция для тестов).
     """
 
@@ -59,8 +73,11 @@ class HostLoop:
     paced: bool = False
     precision_mode: str = "variance"
     time_scale: float = 1.0
+    memory: MemoryRouter | None = None
+    message_provider: TextMessageProvider | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
+    _prev_f: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -76,6 +93,12 @@ class HostLoop:
             )
         if self.time_scale <= 0.0:
             raise ValueError(f"time_scale must be > 0, got {self.time_scale}")
+
+    @property
+    def total_dim(self) -> int:
+        """Полная входная размерность колонок: шина + приор памяти."""
+        prior_dim = self.memory.prior_dim if self.memory is not None else 0
+        return self.bus.bus_dim + prior_dim
 
     def _time_for_tick(self, tick: int) -> tuple[float, float]:
         """Вернуть (dt, now) для тика в соответствии с clock_mode и time_scale.
@@ -108,20 +131,20 @@ class HostLoop:
         ``ones`` — baseline (фоллбэк FEP, ADR-0005 §4).
 
         Args:
-            u: Вектор шины shape=(bus_dim,).
+            u: Вектор шины (с приором памяти) shape=(total_dim,).
 
         Returns:
-            Вектор γ shape=(N_columns * bus_dim,).
+            Вектор γ shape=(N_columns * total_dim,).
         """
         n_columns = self.pipeline.ensemble.n_columns
         if self.precision_mode == "ones":
-            gamma_bus = np.ones(self.bus.bus_dim, dtype=np.float64)
+            gamma_bus = np.ones(u.shape[0], dtype=np.float64)
         else:
             gamma_bus = self.estimator.update(u)
         return np.tile(gamma_bus, n_columns)
 
     def step_once(self, tick: int) -> TickOutcome:
-        """Один тик: время → шина → precision → pipeline → guard → drift → log.
+        """Один тик: время → шина → память → precision → pipeline → guard → log.
 
         Args:
             tick: Номер тика (влияет на шину, провайдеры и время).
@@ -135,12 +158,48 @@ class HostLoop:
         dt, now = self._time_for_tick(tick)
 
         start = time.perf_counter()
-        u = self.bus.step(tick, now)
+        u_base = self.bus.step(tick, now)
+        text = self.message_provider.text_at(tick) if self.message_provider else ""
+        query = self.memory.context_embedding(text) if self.memory else None
+        prior = self.memory.recall_prior(query) if self.memory else None
+        u = np.concatenate([u_base, prior]) if prior is not None else u_base
+
         gamma = self.precision(u)
+        segments = self.bus.segments
+        if self.memory is not None:
+            segments = segments + (
+                BusSegment(
+                    name="memory",
+                    offset=self.bus.bus_dim,
+                    dim=self.memory.prior_dim,
+                    period=1,
+                ),
+            )
         reflex_tags = tuple(s.tag for s in self.bus.last_signals if s.is_reflex)
-        outcome = self.pipeline.tick(u, gamma, dt, self.bus.segments, reflex_tags)
+        outcome = self.pipeline.tick(u, gamma, dt, segments, reflex_tags)
         check_finite(outcome.result)
         drift = self.drift.update(outcome.result)
+
+        memory_prior_value = 0.0
+        memory_hit = False
+        episode_stored = False
+        if self.memory is not None and prior is not None:
+            memory_prior_value = float(prior[0])
+            memory_hit = memory_prior_value != 0.0
+            stored_id = self.memory.maybe_store(
+                text=text,
+                query=query,
+                f=outcome.result.f,
+                prev_f=self._prev_f,
+                valence=outcome.result.valence,
+                stress=outcome.result.allostatic_stress,
+                active_tags=outcome.active_tags,
+                reflex_tags=outcome.reflex_tags,
+                now=now,
+            )
+            episode_stored = stored_id is not None
+
+        self._prev_f = outcome.result.f
         self.meter.record_tick(time.perf_counter() - start)
 
         self.logger.log(
@@ -156,6 +215,9 @@ class HostLoop:
             latency_ms=self.meter.last_latency_s * 1000.0,
             rss_mb=self.meter.last_rss_mb,
             drift=drift,
+            memory_prior=memory_prior_value,
+            memory_hit=memory_hit,
+            episode_stored=episode_stored,
         )
         return outcome
 
@@ -181,15 +243,20 @@ class HostLoop:
         return max_ticks
 
     def close(self) -> None:
-        """Graceful shutdown: закрыть телеметрию (идемпотентно)."""
+        """Graceful shutdown: закрыть телеметрию и store (идемпотентно)."""
         writer = self.logger.writer
         if hasattr(writer, "close"):
             writer.close()
+        if self.memory is not None:
+            store = self.memory.store
+            if hasattr(store, "close"):
+                store.close()
 
 
 def build_host_loop(
     config: HostConfig | None = None,
     meter: ResourceMeter | None = None,
+    messages: tuple[tuple[int, str], ...] = (),
 ) -> HostLoop:
     """Собрать host loop: провайдеры → шина → колонки → конвейер → телеметрия.
 
@@ -202,6 +269,8 @@ def build_host_loop(
             ResourceMeter. Для детерминированного replay/synthetic-прогонов
             следует передать fake-meter (реальный RSS различается между
             запусками — см. ADR-0006, stages/S1_SPEC.md §5).
+        messages: Скрипт коммуникативных сообщений ``(tick, text)`` для
+            ``TextMessageProvider`` (S2; в S3 заменится живым вводом).
 
     Returns:
         Готовый к ``run()`` HostLoop.
@@ -219,15 +288,37 @@ def build_host_loop(
         tick_budget_ms=config.tick_budget_ms,
         rss_budget_mb=config.rss_budget_mb,
     )
+
+    memory: MemoryRouter | None = None
+    message_provider: TextMessageProvider | None = None
+    if config.memory.enabled:
+        embedder = build_embedder(
+            mode=config.memory.embedder_mode,
+            dim=config.memory.embedding_dim,
+            model=config.memory.embedding_model,
+        )
+        store = MemoryStore(db_path=config.memory.db_path, embedding_dim=embedder.dim)
+        memory = MemoryRouter(
+            store=store,
+            embedder=embedder,
+            spike_threshold=config.memory.episode_spike_threshold,
+            recall_limit=config.memory.recall_limit,
+            prior_dim=config.memory.prior_dim,
+        )
+        message_provider = TextMessageProvider(embedder=embedder, messages=messages)
+
     providers = default_providers(
-        message_dim=config.message_dim,
+        message_dim=config.memory.embedding_dim,
         seed=config.seed,
         resource_provider=resource_provider,
+        message_provider=message_provider,
     )
     bus = SignalBus(providers)
+    prior_dim = config.memory.prior_dim if memory is not None else 0
+    total_dim = bus.bus_dim + prior_dim
 
     columns = [
-        params.build(input_dim=bus.bus_dim, state_dim=bus.bus_dim)
+        params.build(input_dim=total_dim, state_dim=total_dim)
         for params in config.columns
     ]
     if len(columns) < config.k:
@@ -250,7 +341,7 @@ def build_host_loop(
         pipeline=pipeline,
         logger=logger,
         estimator=PrecisionEstimator(
-            dim=bus.bus_dim,
+            dim=total_dim,
             window=config.precision_window,
             eps=config.precision_eps,
             gamma_max=config.gamma_max,
@@ -265,4 +356,6 @@ def build_host_loop(
         paced=config.paced,
         precision_mode=config.precision_mode,
         time_scale=config.time_scale,
+        memory=memory,
+        message_provider=message_provider,
     )

@@ -52,6 +52,9 @@ def test_logger_with_mock_writer(
         gamma=2.0,
         active_tags="cpu,battery",
         bus_dim=14,
+        memory_prior=0.5,
+        memory_hit=True,
+        episode_stored=True,
     )
 
     assert mock_writer.write_count == 1
@@ -64,6 +67,9 @@ def test_logger_with_mock_writer(
     assert event.gamma == 2.0
     assert event.active_tags == "cpu,battery"
     assert event.bus_dim == 14
+    assert event.memory_prior == 0.5
+    assert event.memory_hit is True
+    assert event.episode_stored is True
     assert event.phase == "phase1"
     assert event.mode == "free"
     assert isinstance(event.timestamp, float)

@@ -122,14 +122,10 @@ gamma       = mean(precision)  (пусто → gamma_base)
 ```python
 def inverse_variance(samples: Vector, eps: float, gamma_max: float) -> Vector:
     """γᵢ = clip(1 / (varᵢ + eps), 0, gamma_max)."""
-```
 
-### PrecisionEstimator (Shell)
-
-```python
 class PrecisionEstimator:
     def __init__(self, dim: int, window: int = 50,
-                 eps: float = 1e-6, gamma_max: float = 1e6) -> None: ...
+                 eps: float = 1e-6, gamma_max: float = 10.0) -> None: ...
     def update(self, u: Vector) -> Vector:
         """Добавить наблюдение u(t), вернуть γ shape=(dim,)."""
 ```

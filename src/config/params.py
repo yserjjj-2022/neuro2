@@ -18,6 +18,49 @@ from src.core.energy import FreeEnergyCalculator
 
 
 @dataclass(frozen=True)
+class MemoryConfig:
+    """Параметры эпизодической памяти и эмбеддера (S2).
+
+    Attributes:
+        enabled: Включать ли память в host loop.
+        embedder_mode: "auto" (ключ→api, иначе fake), "fake", "api".
+        embedding_dim: Размерность fake-эмбеддера (= dim коммуникативного входа).
+        embedding_model: Модель API-эмбеддера.
+        db_path: Путь к SQLite-файлу памяти.
+        episode_spike_threshold: Порог всплеска F для записи эпизода.
+        recall_limit: Сколько эпизодов извлекать при recall.
+        prior_dim: Размерность приора памяти в шине.
+    """
+
+    enabled: bool = True
+    embedder_mode: str = "auto"
+    embedding_dim: int = 8
+    embedding_model: str = "text-embedding-3-small"
+    db_path: str = "host_memory.db"
+    episode_spike_threshold: float = 1.0
+    recall_limit: int = 1
+    prior_dim: int = 4
+
+    def __post_init__(self) -> None:
+        """Валидация: положительные размеры, известный режим, пороги."""
+        if self.embedder_mode not in ("auto", "fake", "api"):
+            raise ValueError(
+                f"embedder_mode must be 'auto'|'fake'|'api', got {self.embedder_mode!r}"
+            )
+        if self.embedding_dim <= 0:
+            raise ValueError(f"embedding_dim must be > 0, got {self.embedding_dim}")
+        if self.prior_dim <= 0:
+            raise ValueError(f"prior_dim must be > 0, got {self.prior_dim}")
+        if self.recall_limit < 1:
+            raise ValueError(f"recall_limit must be >= 1, got {self.recall_limit}")
+        if self.episode_spike_threshold < 0.0:
+            raise ValueError(
+                f"episode_spike_threshold must be >= 0, "
+                f"got {self.episode_spike_threshold}"
+            )
+
+
+@dataclass(frozen=True)
 class EnergyConfig:
     """Параметры FreeEnergyCalculator.
 
@@ -124,7 +167,6 @@ class HostConfig:
         max_ticks: Число тиков (0 → бесконечно, до Ctrl+C).
         k: Число победителей k-WTA.
         seed: Зерно детерминированных провайдеров.
-        message_dim: Размерность заглушки коммуникативного сигнала.
         active_threshold: Порог активности колонки (‖e‖² > threshold).
         precision_mode: "variance" (γ=1/var) или "ones" (baseline).
         precision_window: Окно оценки дисперсии, тики.
@@ -147,7 +189,6 @@ class HostConfig:
     max_ticks: int = 100
     k: int = 2
     seed: int = 0
-    message_dim: int = 8
     active_threshold: float = 1e-8
     precision_mode: str = "variance"
     precision_window: int = 50
@@ -170,13 +211,12 @@ class HostConfig:
     )
     energy: EnergyConfig = field(default_factory=EnergyConfig)
     attractor: AttractorConfig = field(default_factory=AttractorConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""
         if self.k < 1:
             raise ValueError(f"k must be >= 1, got {self.k}")
-        if self.message_dim <= 0:
-            raise ValueError(f"message_dim must be > 0, got {self.message_dim}")
         if self.dt <= 0.0:
             raise ValueError(f"dt must be > 0, got {self.dt}")
         if self.precision_mode not in ("ones", "variance"):

@@ -4,10 +4,88 @@
 
 Эпизодическая память хоста: хранение прецедентов (правок, ситуаций) с эмбеддингами в SQLite + sqlite-vec, поиск по семантической близости за доли миллисекунды. Модуль хранит и извлекает — не принимает решений.
 
+S2 (`stages/S2_SPEC.md`) добавляет: эмбеддер (текст → вектор), детектор
+значимых событий, приор памяти и `MemoryRouter` (recall → приор, запись).
+
 См. также:
 - `FreeEnergyResult` из `src/core/energy/` — пример frozen dataclass для доменного объекта
 - `TelemetryEvent` из `src/telemetry/` — пример frozen dataclass с плоской структурой
 - `EnergyObserver` / `TelemetryLogger` — примеры Shell с DI через sink/Protocol
+
+## S2: эмбеддер, события, приор, роутер
+
+### Embedder (Protocol) + реализации
+
+```python
+class Embedder(Protocol):
+    @property
+    def dim(self) -> int: ...
+    def embed(self, text: str) -> Vector: ...
+
+
+class EmbedderError(Exception): ...
+
+
+@dataclass(frozen=True)
+class FakeEmbedder:  # детерминированный bag-of-tokens hashing
+    dim: int = 8
+    seed: int = 0
+
+    def embed(self, text: str) -> Vector: ...
+
+
+@dataclass
+class ApiEmbedder:  # OpenAI, ленивый клиент
+    model: str = "text-embedding-3-small"
+    dim: int = 1536
+    api_key: str | None = None
+
+
+def build_embedder(mode="auto", dim=8, model=..., api_key=None) -> Embedder:
+    """auto: ключ→api, иначе fake; fake; api (без ключа → ValueError)."""
+```
+
+### Значимые события (Core)
+
+```python
+def is_significant_event(f, prev_f, reflex_tags, spike_threshold) -> bool:
+    """reflex ИЛИ (f - prev_f) > spike_threshold."""
+
+
+def build_event_content(active_tags, reflex_tags, valence, stress) -> str:
+    """Дескриптор ситуации для эпизода без текста."""
+```
+
+### Приор памяти (Core)
+
+```python
+MEMORY_PRIOR_DIM = 4
+
+
+def encode_memory_prior(episode, query) -> Vector:
+    """[cos(query, ep.embedding), tanh(valence), tanh(stress), tanh(f)].
+
+    None episode/query → нули. Компоненты ∈ [-1, 1].
+    """
+```
+
+### MemoryRouter (Shell)
+
+```python
+class MemoryRouter:
+    def __init__(
+        self, store, embedder, spike_threshold, recall_limit=1, prior_dim=4
+    ) -> None: ...
+    def context_embedding(self, text) -> Vector | None: ...  # кэш
+    def recall_prior(self, query) -> Vector: ...  # top-1 → приор
+    def maybe_store(
+        self, *, text, query, f, prev_f, valence, stress, active_tags, reflex_tags, now
+    ) -> int | None: ...
+```
+
+**Crash-safety:** сбой store/recall/embed → лог + безопасный дефолт (нули /
+None); память не роняет тик. Это осознанное отличие от `MemoryStore`
+(fail-fast для прямого caller'а).
 
 ## Публичный интерфейс
 

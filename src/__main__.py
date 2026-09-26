@@ -11,7 +11,7 @@ import logging
 import signal
 from pathlib import Path
 
-from src.config import HostConfig
+from src.config import HostConfig, MemoryConfig
 from src.host.loop import HostLoop, build_host_loop
 
 logger = logging.getLogger(__name__)
@@ -61,10 +61,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Зерно детерминированных провайдеров. По умолчанию 0.",
     )
     parser.add_argument(
-        "--message-dim",
-        type=int,
-        default=8,
-        help="Размерность заглушки коммуникативного сигнала. По умолчанию 8.",
+        "--embedder",
+        choices=("auto", "fake", "api"),
+        default="auto",
+        help="Эмбеддер памяти: auto (ключ→api, иначе fake), fake, api.",
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=Path("host_memory.db"),
+        help="Путь к SQLite-файлу памяти.",
+    )
+    parser.add_argument(
+        "--no-memory",
+        action="store_true",
+        help="Отключить память (контур S1).",
     )
     parser.add_argument(
         "--precision",
@@ -107,11 +118,15 @@ def main(argv: list[str] | None = None) -> int:
             max_ticks=args.ticks,
             k=args.k,
             seed=args.seed,
-            message_dim=args.message_dim,
             precision_mode=args.precision,
             clock_mode=args.clock_mode,
             paced=args.paced,
             log_path=str(args.log),
+            memory=MemoryConfig(
+                enabled=not args.no_memory,
+                embedder_mode=args.embedder,
+                db_path=str(args.db),
+            ),
         )
     )
 
