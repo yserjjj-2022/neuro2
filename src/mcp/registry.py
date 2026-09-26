@@ -8,7 +8,6 @@ Functional Core / Imperative Shell (ADR-0004):
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -112,7 +111,7 @@ class SignalRegistry:
         """
         return [s for s in self._sources if s.is_reflex]
 
-    def aggregate(self) -> Optional[Vector]:
+    def aggregate(self) -> Vector | None:
         """Агрегировать все сигналы в единый вектор для CMCEnsemble.
 
         В Фазе 1: простая конкатенация всех векторов data.

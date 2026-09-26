@@ -122,3 +122,8 @@ class CMCEnsemble:
     def active(self) -> int:
         """Число активных колонок после последнего step(). До первого — 0."""
         return self._active
+
+    @property
+    def n_columns(self) -> int:
+        """Число колонок в ансамбле (для расчёта размерности precision)."""
+        return len(self._columns)

@@ -43,6 +43,12 @@ class CMCPipeline:
     voting: VotingManager
     attractor: TaskAttractor
     observer: EnergyObserver
+    writer: TelemetryWriter | None = None
+
+    def close(self) -> None:
+        """Закрыть телеметрию (graceful shutdown). Идемпотентно."""
+        if self.writer is not None:
+            self.writer.close()
 
     def tick(self, u: Vector, precision: Vector) -> FreeEnergyResult:
         """Один полный тик хоста: CMC → voting → energy → telemetry.
@@ -106,6 +112,8 @@ def build_cmc_pipeline(
     k: int,
     log_path: Path,
     active_threshold: float = 1e-8,
+    attractor: TaskAttractor | None = None,
+    calculator: FreeEnergyCalculator | None = None,
 ) -> CMCPipeline:
     """Собирает полный per-tick конвейер: CMC → voting → attractors → energy → telemetry.
 
@@ -116,13 +124,19 @@ def build_cmc_pipeline(
         active_threshold: Порог активности колонки (‖e‖² > threshold).
             Дефолт 1e-8 — EMA never converges to exact 0.0 in float64,
             so 0.0 would produce false-positive active_columns.
+        attractor: Готовый TaskAttractor (из config). None → дефолтные
+            параметры на len(columns) задач.
+        calculator: Готовый FreeEnergyCalculator (из config). None → дефолты.
 
     Returns:
         CMCPipeline — готовый к tick(u, precision).
     """
     ensemble = CMCEnsemble(columns=columns, active_threshold=active_threshold)
     voting = VotingManager(k=k)
-    attractor = TaskAttractor(n_tasks=len(columns))
+    if attractor is None:
+        attractor = TaskAttractor(n_tasks=len(columns))
+    if calculator is None:
+        calculator = FreeEnergyCalculator()
 
     writer = TelemetryWriter(log_path=log_path)
     telemetry_logger = TelemetryLogger(writer=writer, phase="phase1", mode="free")
@@ -137,5 +151,11 @@ def build_cmc_pipeline(
             active_columns=ensemble.active,
         )
 
-    observer = EnergyObserver(calculator=FreeEnergyCalculator(), sink=sink)
-    return CMCPipeline(ensemble=ensemble, voting=voting, attractor=attractor, observer=observer)
+    observer = EnergyObserver(calculator=calculator, sink=sink)
+    return CMCPipeline(
+        ensemble=ensemble,
+        voting=voting,
+        attractor=attractor,
+        observer=observer,
+        writer=writer,
+    )

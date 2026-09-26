@@ -11,4 +11,4 @@ Functional Core / Imperative Shell (ADR-0004):
 from .models import SignalCategory, SignalSource
 from .registry import SignalRegistry
 
-__all__ = ["SignalCategory", "SignalSource", "SignalRegistry"]
+__all__ = ["SignalCategory", "SignalRegistry", "SignalSource"]

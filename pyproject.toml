@@ -1,7 +1,7 @@
 [project]
 name = "neuro2"
 version = "0.1.0"
-description = "Add your description here"
+description = "Адаптивный хост на принципах неокортекса: канонические колоночные микроконтуры, свободная энергия, активное выведение"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

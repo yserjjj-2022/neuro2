@@ -5,10 +5,12 @@ Frozen dataclass + enum — аналог FreeEnergyResult (energy), VotingResult
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
-from src.mcp.models import SignalCategory, SignalSource, Vector
+from src.mcp.models import SignalCategory, SignalSource
 
 
 @pytest.fixture()
@@ -54,7 +56,7 @@ def test_signal_source_frozen() -> None:
         category=SignalCategory.EXTEROCEPTIVE,
         data=np.array([1.0], dtype=np.float64),
     )
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         sig.severity = 0.5  # type: ignore[assignment]
 
 

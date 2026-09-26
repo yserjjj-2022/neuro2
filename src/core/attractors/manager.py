@@ -49,6 +49,7 @@ class TaskAttractor:
         plasticity_gain: float = 0.1,
         basin_threshold: float = 0.15,
         convergence_threshold: float = 1e-8,
+        dominance_threshold: float = 0.3,
     ) -> None:
         """Инициализация аттрактора.
 
@@ -71,6 +72,8 @@ class TaskAttractor:
                 Если max(scores) < τ, все scores ~0 (система сходится).
                 При converged=True: переключение запрещено, пока
                 history_size < min_dwell (защита от флуктуаций нуля).
+            dominance_threshold: δ — порог явного превосходства конкурента
+                для немедленного переключения (Δscore < -δ), игнорируя dwell.
 
         Raises:
             ValueError: Если n_tasks < 2 (не существует runner-up).
@@ -86,6 +89,7 @@ class TaskAttractor:
         self._plasticity_gain: float = plasticity_gain
         self._basin_threshold: float = basin_threshold
         self._convergence_threshold: float = convergence_threshold
+        self._dominance_threshold: float = dominance_threshold
 
         # Состояние
         self._mask: Vector | None = None
@@ -150,7 +154,9 @@ class TaskAttractor:
         )
 
         # Шаг 4: немедленное переключение
-        if check_immediate_switch(score_current, score_runner_up):
+        if check_immediate_switch(
+            score_current, score_runner_up, self._dominance_threshold
+        ):
             mask = np.zeros(self._n_tasks, dtype=np.float64)
             winner_idx = int(np.argmax(scores))
             mask[winner_idx] = 1.0
@@ -158,9 +164,10 @@ class TaskAttractor:
             self._history_size = 0
             converged = bool(np.max(scores) < self._convergence_threshold)
             logger.debug(
-                "attractor: immediate_switch held=%d winner=%d "
-                "Δ=%.4f",
-                held_index, winner_idx, score_runner_up - score_current,
+                "attractor: immediate_switch held=%d winner=%d Δ=%.4f",
+                held_index,
+                winner_idx,
+                score_runner_up - score_current,
             )
             return TaskAttraction(
                 mask=mask,
@@ -205,9 +212,9 @@ class TaskAttractor:
             self._mask = mask
             self._history_size = 0
             logger.debug(
-                "attractor: switch basin held=%d winner=%d "
-                "Δ=%.4f",
-                held_index, current_winner_idx,
+                "attractor: switch basin held=%d winner=%d Δ=%.4f",
+                held_index,
+                current_winner_idx,
                 score_runner_up - score_current,
             )
         else:
