@@ -79,6 +79,9 @@ class HostLoop:
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
     _prev_f: float = field(default=0.0, init=False, repr=False)
+    _last_text: str = field(default="", init=False, repr=False)
+    _cached_query: np.ndarray | None = field(default=None, init=False, repr=False)
+    _cached_prior: np.ndarray | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -94,6 +97,10 @@ class HostLoop:
             )
         if self.time_scale <= 0.0:
             raise ValueError(f"time_scale must be > 0, got {self.time_scale}")
+        # Память включена, но сообщений ещё не было → нулевой приор
+        # (ширина шины стабильна: prior всегда присутствует).
+        if self.memory is not None and self._cached_prior is None:
+            self._cached_prior = np.zeros(self.memory.prior_dim, dtype=np.float64)
 
     @property
     def total_dim(self) -> int:
@@ -144,8 +151,43 @@ class HostLoop:
             gamma_bus = self.estimator.update(u)
         return np.tile(gamma_bus, n_columns)
 
+    def _update_prior_if_new_text(self, text: str) -> np.ndarray | None:
+        """Обновить приор памяти только при новом тексте (event-triggered).
+
+        Эмбеддинг и recall — дорогие (сеть, SQLite); текст приходит редко,
+        а тики частые. При неизменном тексте используется сохранённый приор.
+
+        Args:
+            text: Текущий текст собеседника ("" → нет сообщения).
+
+        Returns:
+            Эмбеддинг нового текста (query) или None; приор доступен через
+            ``_cached_prior``.
+        """
+        if self.memory is None:
+            return None
+        if text == self._last_text:
+            return self._cached_query
+
+        self._last_text = text
+        if not text:
+            self._cached_query = None
+            self._cached_prior = np.zeros(self.memory.prior_dim, dtype=np.float64)
+            return None
+
+        query = self.memory.context_embedding(text)
+        self._cached_query = query
+        self._cached_prior = self.memory.recall_prior(query)
+        return query
+
     def step_once(self, tick: int) -> TickOutcome:
         """Один тик: время → шина → память → precision → pipeline → guard → log.
+
+        Коммуникативный вход — **событийный**: эмбеддинг и recall запускаются
+        только при появлении нового текста (сравнение с предыдущим). Между
+        сообщениями используется сохранённый приор — сеть не трогается на
+        каждом тике (манифест §3.Е, ADR-0006: непрерывный аффективный контур,
+        event-triggered рациональный).
 
         Args:
             tick: Номер тика (влияет на шину, провайдеры и время).
@@ -160,12 +202,11 @@ class HostLoop:
 
         # Сенсорная фаза (включая эмбеддинг — сетевой I/O) НЕ входит в
         # ресурсную латентность: сеть — внешняя нагрузка, а «тахикардия»
-        # измеряет собственные вычисления хоста. Иначе реальный API-эмбеддер
-        # (> бюджета тика) держал бы severity ≥ 0.9 → постоянный reflex.
+        # измеряет собственные вычисления хоста.
         u_base = self.bus.step(tick, now)
         text = self.message_provider.text_at(tick) if self.message_provider else ""
-        query = self.memory.context_embedding(text) if self.memory else None
-        prior = self.memory.recall_prior(query) if self.memory else None
+        query = self._update_prior_if_new_text(text)
+        prior = self._cached_prior
         u = np.concatenate([u_base, prior]) if prior is not None else u_base
 
         compute_start = time.perf_counter()
@@ -191,7 +232,7 @@ class HostLoop:
         episode_stored = False
         if self.memory is not None and prior is not None:
             memory_prior_value = float(prior[0])
-            memory_hit = memory_prior_value != 0.0
+            memory_hit = bool(np.any(prior != 0.0))
             stored_id = self.memory.maybe_store(
                 text=text,
                 query=query,

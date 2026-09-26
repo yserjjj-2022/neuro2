@@ -9,7 +9,7 @@ swaps in without changing the interface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -25,8 +25,8 @@ class TextMessageProvider:
     ``(tick, text)`` для mock/тестов; сообщение остаётся активным до
     следующего (последнее с ``tick' <= tick``).
 
-    Повторные вызовы для одного текста дёшевы: ``ApiEmbedder`` кэширует
-    результат (активное сообщение не меняется между тиками).
+    Кэширует эмбеддинг текста: ``SignalBus`` вызывает ``read()`` каждый тик,
+    но активное сообщение между тиками не меняется, а эмбеддинг дорог.
 
     Attributes:
         embedder: Преобразователь текста в вектор.
@@ -41,6 +41,9 @@ class TextMessageProvider:
     tag: str = "user_message"
     category: SignalCategory = SignalCategory.COMMUNICATIVE
     period: int = 1
+    _cache: dict[str, np.ndarray] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     @property
     def dim(self) -> int:
@@ -77,9 +80,12 @@ class TextMessageProvider:
         text = self.text_at(tick)
         if not text:
             data = np.zeros(self.dim, dtype=np.float64)
+        elif text in self._cache:
+            data = self._cache[text]
         else:
             try:
                 data = np.asarray(self.embedder.embed(text), dtype=np.float64)
+                self._cache[text] = data
             except EmbedderError:
                 data = np.zeros(self.dim, dtype=np.float64)
         return SignalSource(category=self.category, data=data, tag=self.tag)

@@ -226,8 +226,12 @@ message_provider: TextMessageProvider | None = None
 dt, now  = time source
 u_base   = bus.step(tick, now)
 text     = message_provider.text_at(tick)           # НОВОЕ
-query    = memory.context_embedding(text)            # НОВОЕ (кэш)
-prior    = memory.recall_prior(query)                # НОВОЕ
+# Событийно: эмбеддинг+recall только при смене текста (не каждый тик!)
+if text != _last_text:
+    query = memory.context_embedding(text)           # НОВОЕ (event-triggered)
+    prior = memory.recall_prior(query)               # НОВОЕ
+    _last_text, _cached_query, _cached_prior = ...
+prior    = _cached_prior (нули, если сообщений не было)
 u        = concat(u_base, prior)                     # НОВОЕ
 segments = bus.segments + (memory_segment,)          # НОВОЕ
 γ        = precision(u)                              # dim = bus_dim + prior_dim
@@ -237,6 +241,12 @@ drift    = DriftDetector.update(outcome.result)
 memory.maybe_store(...)                              # НОВОЕ
 telemetry.log(...)
 ```
+
+**Коммуникативный вход — событийный** (манифест §3.Е, ADR-0006): тик —
+непрерывный аффективный контур, а текст обрабатывается **один раз при
+появлении**. Между сообщениями сеть/recall не трогаются, используется
+сохранённый приор (нули до первого сообщения). Приор держится до следующего
+сообщения (затухание веса — BACKLOG).
 
 - `memory_segment = BusSegment(name="memory", offset=bus.bus_dim,
   dim=prior_dim, period=1)`.

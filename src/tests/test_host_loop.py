@@ -171,6 +171,35 @@ class TestHostLoopExperiment:
 class TestHostLoopMechanics:
     """Механика loop: precision, время, валидация, graceful shutdown."""
 
+    def test_recall_only_on_new_message(self, tmp_path: Path) -> None:
+        """Событийность: recall запускается только при новом тексте.
+
+        Тики частые, сообщения редкие. Пока текст не меняется, recall
+        (SQLite MATCH) не вызывается — иначе он дёргался бы каждый тик.
+        """
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
+        loop = build_host_loop(
+            config,
+            meter=ResourceMeter(),
+            messages=((0, "hello"), (20, "hello")),  # тот же текст дважды
+        )
+        recall_calls = {"n": 0}
+        original = loop.memory.recall_prior  # type: ignore[union-attr]
+
+        def counting_recall(query: object) -> object:
+            recall_calls["n"] += 1
+            return original(query)  # type: ignore[arg-type]
+
+        loop.memory.recall_prior = counting_recall  # type: ignore[union-attr,method-assign]
+
+        loop.run(40)
+        loop.close()
+        # 40 тиков, но recall только на смене текста (тик 0); тик 20 — тот же.
+        assert recall_calls["n"] == 1
+
     def test_sensory_io_excluded_from_latency(self, tmp_path: Path) -> None:
         """Медленный сенсорный провайдер не влияет на ресурсную латентность.
 

@@ -19,8 +19,10 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 dt, now = time source (synthetic: tick·tick_dt·time_scale; wall: measured)
 u_base  = SignalBus.step(tick, now)
 text    = message_provider.text_at(tick)      # S2: коммуникативный вход
-query   = memory.context_embedding(text)       # S2 (кэш)
-prior   = memory.recall_prior(query)           # S2
+# Событийно: эмбеддинг+recall только при смене текста (не каждый тик)
+if text != last_text:
+    query = memory.context_embedding(text)     # S2 (event-triggered)
+    prior = memory.recall_prior(query)         # S2
 u       = concat(u_base, prior)                # S2: total_dim = bus_dim + prior_dim
 γ       = PrecisionEstimator.update(u)  (variance) или ones (baseline)
 outcome = pipeline.tick(u, γ, dt, segments, reflex_tags)
@@ -29,6 +31,12 @@ drift   = DriftDetector.update(outcome.result)
 stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
 telemetry.log(...)                      # loop владеет writer'ом
 ```
+
+**Коммуникативный вход — событийный** (манифест §3.Е, ADR-0006): тик —
+непрерывный аффективный контур (циркадное, батарея, ресурсы), а текст
+обрабатывается **один раз при появлении**. Между сообщениями сеть/recall не
+трогаются; хранится последний приор (нули до первого сообщения). Приор
+держится до следующего сообщения (затухание веса — BACKLOG).
 
 `memory=None` / `MemoryConfig(enabled=False)` → контур S1 (prior не
 добавляется, `total_dim == bus_dim`). Сегмент памяти:
