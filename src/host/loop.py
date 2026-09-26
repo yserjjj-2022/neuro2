@@ -158,13 +158,17 @@ class HostLoop:
         """
         dt, now = self._time_for_tick(tick)
 
-        start = time.perf_counter()
+        # Сенсорная фаза (включая эмбеддинг — сетевой I/O) НЕ входит в
+        # ресурсную латентность: сеть — внешняя нагрузка, а «тахикардия»
+        # измеряет собственные вычисления хоста. Иначе реальный API-эмбеддер
+        # (> бюджета тика) держал бы severity ≥ 0.9 → постоянный reflex.
         u_base = self.bus.step(tick, now)
         text = self.message_provider.text_at(tick) if self.message_provider else ""
         query = self.memory.context_embedding(text) if self.memory else None
         prior = self.memory.recall_prior(query) if self.memory else None
         u = np.concatenate([u_base, prior]) if prior is not None else u_base
 
+        compute_start = time.perf_counter()
         gamma = self.precision(u)
         segments = self.bus.segments
         if self.memory is not None:
@@ -180,6 +184,7 @@ class HostLoop:
         outcome = self.pipeline.tick(u, gamma, dt, segments, reflex_tags)
         check_finite(outcome.result)
         drift = self.drift.update(outcome.result)
+        self.meter.record_tick(time.perf_counter() - compute_start)
 
         memory_prior_value = 0.0
         memory_hit = False
@@ -201,7 +206,6 @@ class HostLoop:
             episode_stored = stored_id is not None
 
         self._prev_f = outcome.result.f
-        self.meter.record_tick(time.perf_counter() - start)
 
         self.logger.log(
             free_energy=outcome.result.f,

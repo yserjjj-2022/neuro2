@@ -32,6 +32,7 @@ from src.host.sources import (
     StepProvider,
 )
 from src.host.wiring import build_cmc_pipeline
+from src.mcp import SignalCategory, SignalSource
 from src.telemetry import TelemetryLogger, TelemetryWriter
 
 
@@ -169,6 +170,37 @@ class TestHostLoopExperiment:
 
 class TestHostLoopMechanics:
     """Механика loop: precision, время, валидация, graceful shutdown."""
+
+    def test_sensory_io_excluded_from_latency(self, tmp_path: Path) -> None:
+        """Медленный сенсорный провайдер не влияет на ресурсную латентность.
+
+        Реальный API-эмбеддер медленнее бюджета тика; если бы его время
+        попадало в latency, severity ≥ 0.9 давал бы постоянный reflex.
+        Loop измеряет только вычислительную фазу.
+        """
+        import time as _time
+
+        class SlowProvider:
+            tag = "slow"
+            category = SignalCategory.EXTEROCEPTIVE
+            dim = 1
+            period = 1
+
+            def read(self, tick: int, now: float) -> SignalSource:
+                _time.sleep(0.02)  # 20 мс — сетевой I/O
+                return SignalSource(
+                    category=self.category,
+                    data=np.array([1.0]),
+                    tag=self.tag,
+                )
+
+        loop = _loop(tmp_path, [SlowProvider()], tick_dt=0.01)
+        loop.step_once(0)
+        loop.close()
+
+        # Сон был 20 мс, но latency (compute) много меньше
+        assert loop.meter.last_latency_s < 0.01
+        assert not any(s.is_reflex for s in loop.bus.last_signals)
 
     def test_precision_ones_shape(self, tmp_path: Path) -> None:
         loop = _loop(tmp_path, [ConstantProvider(value=(1.0, 2.0))])
