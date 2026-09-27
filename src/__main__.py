@@ -142,6 +142,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Включить reasoning у LLM (по умолчанию выкл; LLM — актюатор, ADR-0007).",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Печатать состояние (F/valence/stress/γ/задача/recall/дрейф) в чате.",
+    )
     return parser.parse_args(argv)
 
 
@@ -171,7 +176,12 @@ def _run_chat(loop: HostLoop, args: argparse.Namespace) -> int:
         default_register=args.register,
     )
     history = ConversationHistory(max_turns=args.history_turns)
-    session = ChatSession(loop=loop, controller=controller, history=history)
+    session = ChatSession(
+        loop=loop,
+        controller=controller,
+        history=history,
+        show_status=args.status,
+    )
     logger.info(
         "Chat session started (llm=%s, model=%s). /quit to exit.", args.llm, model
     )

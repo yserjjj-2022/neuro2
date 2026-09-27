@@ -30,6 +30,9 @@
     --f-threshold/--history-turns/--reasoning`.
   - `core/cmc/ensemble.py`: свойство `column_configs`; `host/loop.py`:
     `last_outcome`.
+- [x] **7a. Мини-индикатор состояния**
+  - `status.py`: `format_status`; `ChatSession(show_status=...)`;
+    `--status`; `host/loop.py`: `last_drift`/`last_memory_hit`.
 - [x] **8. Reasoning отключён (ADR-0007)**
   - `ApiLlmClient.reasoning=False` по умолчанию + ручка.
 - [x] **9. Документация**

@@ -57,6 +57,15 @@ class TestChatSession:
         assert len(output) == 1
         assert output[0] != ""
 
+    def test_status_line_shown(self, tmp_path: Path) -> None:
+        session, output = _session(tmp_path, ["привет", "/quit"])
+        session.show_status = True
+        session.run()
+        session.loop.close()
+        assert len(output) == 2
+        assert output[0].startswith("[F=")
+        assert "recall=" in output[0]
+
     def test_quit_stops(self, tmp_path: Path) -> None:
         session, _output = _session(tmp_path, ["/quit"])
         assert session.run() == 0

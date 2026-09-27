@@ -18,6 +18,7 @@ import numpy as np
 from src.host.loop import HostLoop
 from src.speech.controller import SpeechController
 from src.speech.history import ConversationHistory
+from src.speech.status import format_status
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class ChatSession:
         input_fn: Источник ввода (инъекция для тестов).
         output_fn: Приёмник вывода (инъекция для тестов).
         ticks_per_turn: Сколько тиков прогнать на реплику (сообщение «осмыслено»).
+        show_status: Печатать строку состояния перед каждой репликой (HITL).
     """
 
     def __init__(
@@ -45,6 +47,7 @@ class ChatSession:
         input_fn: Callable[[str], str] = input,
         output_fn: Callable[[str], None] = print,
         ticks_per_turn: int = 3,
+        show_status: bool = False,
     ) -> None:
         if ticks_per_turn < 1:
             raise ValueError(f"ticks_per_turn must be >= 1, got {ticks_per_turn}")
@@ -54,6 +57,7 @@ class ChatSession:
         self.input_fn = input_fn
         self.output_fn = output_fn
         self.ticks_per_turn = ticks_per_turn
+        self.show_status = show_status
         self._tick = 0
         self._last_message = ""
 
@@ -94,7 +98,21 @@ class ChatSession:
         f = outcome.result.f if outcome is not None else 0.0
         valence = outcome.result.valence if outcome is not None else 0.0
         stress = outcome.result.allostatic_stress if outcome is not None else 0.0
+        gamma = outcome.result.gamma if outcome is not None else 0.0
         task = self._active_task()
+
+        if self.show_status:
+            self.output_fn(
+                format_status(
+                    f=f,
+                    valence=valence,
+                    stress=stress,
+                    gamma=gamma,
+                    task=task,
+                    recall_hit=self.loop.last_memory_hit,
+                    drift=self.loop.last_drift,
+                )
+            )
 
         reply = self.controller.respond(
             user_text=user_input,

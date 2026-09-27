@@ -79,7 +79,9 @@ uv run python -m src --chat --llm auto --db host_memory.db
 `--llm auto` берёт реальную модель при наличии ключа, иначе детерминированный
 fake. Команды в чате: `/clear` (очистить историю), `/quit` (выход).
 `--register brief|terse|normal|story` — длина ответа; `--reasoning` включает
-reasoning у модели (по умолчанию выкл).
+reasoning у модели (по умолчанию выкл); `--status` печатает состояние хоста
+(F, valence, stress, γ, задача, recall, дрейф) перед каждой репликой.
+Подробнее — [src/speech/README.md](src/speech/README.md).
 
 ## Лицензия
 

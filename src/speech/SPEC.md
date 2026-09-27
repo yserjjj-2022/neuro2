@@ -23,6 +23,7 @@
 | `history.py` | Shell | `ConversationHistory` — кольцевой буфер диалога |
 | `llm.py` | Shell | `LlmClient` (Protocol), `FakeLlmClient`, `ApiLlmClient`, `build_llm_client`, `llm_settings_from_env` |
 | `controller.py` | Shell | `should_speak`, `SpeechController` |
+| `status.py` | Core | `format_status` — строка состояния для стенда |
 | `chat.py` | Shell | `ChatSession` — CLI-стенд (`/clear`, `/quit`) |
 
 ## Core: Intent-Frame и речевые режимы
@@ -104,13 +105,25 @@ class SpeechController:
 ```python
 class ChatSession:
     def __init__(self, loop, controller, history=None,
-                 input_fn=input, output_fn=print, ticks_per_turn=3) -> None: ...
+                 input_fn=input, output_fn=print, ticks_per_turn=3,
+                 show_status=False) -> None: ...
     def run(self, max_turns: int = 0) -> int: ...
 ```
 
 Ввод → сообщение в loop → N тиков → `controller.respond` → печать.
 Команды `/clear` (очистить историю), `/quit`. Реплики хоста **не** пишутся в
 память (S3). `input_fn`/`output_fn` инъектируются для тестов.
+
+При `show_status=True` (CLI `--status`) перед каждой репликой печатается
+строка состояния из `format_status`:
+
+```
+[F=18.06 val=-16.83 stress=1.36 γ=9.95 задача=tone recall=1 дрейф=нет]
+```
+
+Поля: F, valence, stress, γ, активная задача, найден ли прецедент, дрейф.
+Нужна для HITL-валидации ворот S3 («тон следует аффекту»). Полноценная
+панель (графики, pause/step/inject) — S4 (control channel).
 
 ## Инварианты
 

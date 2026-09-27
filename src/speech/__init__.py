@@ -31,6 +31,7 @@ from .llm import (
     build_llm_client,
     llm_settings_from_env,
 )
+from .status import format_status
 
 __all__ = [
     "DEFAULT_MODEL",
@@ -47,6 +48,7 @@ __all__ = [
     "build_intent_frame",
     "build_llm_client",
     "describe_affect",
+    "format_status",
     "llm_settings_from_env",
     "register_max_tokens",
     "render_messages",

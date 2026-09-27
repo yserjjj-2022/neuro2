@@ -83,6 +83,8 @@ class HostLoop:
     _cached_query: np.ndarray | None = field(default=None, init=False, repr=False)
     _cached_prior: np.ndarray | None = field(default=None, init=False, repr=False)
     last_outcome: TickOutcome | None = field(default=None, init=False, repr=False)
+    last_drift: bool = field(default=False, init=False, repr=False)
+    last_memory_hit: bool = field(default=False, init=False, repr=False)
     _spoke_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -272,6 +274,8 @@ class HostLoop:
         )
         self._spoke_pending = False
         self.last_outcome = outcome
+        self.last_drift = drift
+        self.last_memory_hit = memory_hit
         return outcome
 
     def mark_spoke(self) -> None:

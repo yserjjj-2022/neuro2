@@ -215,6 +215,9 @@ loop идёт тиками (аффективный контур)
 - Ввод → `messages` провайдера (loop эмбеддит при новом тексте — событийно).
 - Ответ печатается и добавляется в историю.
 - **Команды:** `/clear` (очистить историю диалога), `/quit` (выход).
+- **Мини-индикатор (`--status`):** строка состояния перед репликой (F, valence,
+  stress, γ, активная задача, recall, дрейф) — для HITL-валидации тона.
+  Полноценная панель (pause/step/inject/графики) — S4 (control channel).
 - Реализация — Shell (`ChatSession`), тестируется через инъекцию
   `input_fn`/`output_fn`.
 
@@ -222,8 +225,14 @@ loop идёт тиками (аффективный контур)
 class ChatSession:
     def __init__(self, loop: HostLoop, controller: SpeechController,
                  history: ConversationHistory | None = None,
-                 input_fn=input, output_fn=print) -> None: ...
+                 input_fn=input, output_fn=print, ticks_per_turn=3,
+                 show_status=False) -> None: ...
     def run(self, max_turns: int = 0) -> int: ...   # 0 → до /quit
+```
+
+```python
+def format_status(*, f, valence, stress, gamma, task, recall_hit, drift) -> str:
+    """[F=.. val=.. stress=.. γ=.. задача=.. recall=0/1 дрейф=да/нет]"""
 ```
 
 ## 5a. Что записывается в память
@@ -302,6 +311,7 @@ class ChatSession:
 | Стриминг ответа | Отложено | S3: обычный вызов; стриминг — позже |
 | Retry/timeout LLM | Отложено | S3: без retry; timeout — параметр позже |
 | Reasoning у LLM | Решено | Отключён (ADR-0007: LLM — актюатор, не рассуждающий) |
+| Мини-индикатор состояния | Решено | `--status` (строка F/val/stress/γ/задача/recall/дрейф); панель — S4 |
 
 ## Implementation Notes
 
