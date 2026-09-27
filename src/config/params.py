@@ -160,6 +160,58 @@ class AttractorConfig:
 
 
 @dataclass(frozen=True)
+class SpeechConfig:
+    """Параметры речи (S3).
+
+    Настройки LLM (base_url, model) — в окружении (.env): ``LLM_BASE_URL``,
+    ``LLM_MODEL``, ``LLM_API_KEY`` (RouterAI по умолчанию).
+
+    Attributes:
+        enabled: Включать ли речь (S3 по умолчанию выкл; включается --chat).
+        llm_mode: "auto" (ключ→api, иначе fake), "fake", "api".
+        f_threshold: Порог F для инициативы (не для ответа на сообщение).
+        recall_limit: Сколько прецедентов подавать в Intent-Frame.
+        default_register: Речевой режим (brief/terse/normal/story).
+        history_turns: Глубина истории диалога (сообщений).
+        temperature: Температура генерации.
+        style: Дефолтный стиль (S5 — из характера).
+        reasoning: Включить reasoning у LLM (по умолчанию False; ADR-0007).
+    """
+
+    enabled: bool = False
+    llm_mode: str = "auto"
+    f_threshold: float = 1.0
+    recall_limit: int = 3
+    default_register: str = "brief"
+    history_turns: int = 20
+    temperature: float = 0.7
+    style: str = "neutral"
+    reasoning: bool = False
+
+    def __post_init__(self) -> None:
+        """Валидация: известные режимы, неотрицательные пороги."""
+        if self.llm_mode not in ("auto", "fake", "api"):
+            raise ValueError(
+                f"llm_mode must be 'auto'|'fake'|'api', got {self.llm_mode!r}"
+            )
+        if self.f_threshold < 0.0:
+            raise ValueError(f"f_threshold must be >= 0, got {self.f_threshold}")
+        if self.recall_limit < 1:
+            raise ValueError(f"recall_limit must be >= 1, got {self.recall_limit}")
+        if self.default_register not in ("brief", "terse", "normal", "story"):
+            raise ValueError(
+                f"default_register must be brief|terse|normal|story, "
+                f"got {self.default_register!r}"
+            )
+        if self.history_turns < 0:
+            raise ValueError(f"history_turns must be >= 0, got {self.history_turns}")
+        if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError(
+                f"temperature must be in [0, 2], got {self.temperature}"
+            )
+
+
+@dataclass(frozen=True)
 class HostConfig:
     """Полная конфигурация host loop.
 
@@ -185,6 +237,8 @@ class HostConfig:
         columns: Параметры колонок.
         energy: Параметры energy.
         attractor: Параметры аттрактора.
+        memory: Параметры памяти.
+        speech: Параметры речи (S3).
     """
 
     dt: float = 0.1
@@ -214,6 +268,7 @@ class HostConfig:
     energy: EnergyConfig = field(default_factory=EnergyConfig)
     attractor: AttractorConfig = field(default_factory=AttractorConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    speech: SpeechConfig = field(default_factory=SpeechConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""

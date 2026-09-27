@@ -7,10 +7,12 @@ Functional Core / Imperative Shell (ADR-0004).
 
 S1: событие расширено до 15 полей — сопоставление с тиком, теги каналов,
 reflex, ресурсы, drift.
+S2: +3 поля памяти (prior/hit/stored) = 18.
+S3: +`spoke` = 19.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 18 полей)
+### TelemetryEvent (frozen dataclass, 19 полей)
 
 ```python
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class TelemetryEvent:
     memory_prior: float  # cos извлечённого эпизода (S2)
     memory_hit: bool  # recall нашёл эпизод (S2)
     episode_stored: bool  # эпизод записан на тике (S2)
+    spoke: bool  # хост сгенерировал реплику (S3)
     phase: str
     mode: str
 ```
@@ -76,6 +79,7 @@ def log(
     memory_prior=0.0,
     memory_hit=False,
     episode_stored=False,
+    spoke=False,
 ) -> None: ...
 ```
 
@@ -89,9 +93,9 @@ def log(
 4. **Flush после записи** (crash-safety).
 5. **DI через Protocol** `SupportsWrite`.
 
-## Критерии приёмки (S1+S2)
+## Критерии приёмки (S1+S2+S3)
 
-- [x] `TelemetryEvent` — 18 полей, все типизированы
+- [x] `TelemetryEvent` — 19 полей, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)

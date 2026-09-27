@@ -13,17 +13,21 @@ def is_significant_event(
     prev_f: float,
     reflex_tags: tuple[str, ...],
     spike_threshold: float,
+    has_new_message: bool = False,
 ) -> bool:
     """Значимо ли событие для эпизодической памяти.
 
-    Событие значимо, если есть критический сигнал (``reflex_tags``) ИЛИ
-    F(t) подскочила относительно предыдущего тика выше порога.
+    Событие значимо, если есть критический сигнал (``reflex_tags``), ИЛИ
+    F(t) подскочила относительно предыдущего тика выше порога, ИЛИ пришло
+    новое сообщение оператора (коммуникативный вход событиен по природе —
+    ADR-0006).
 
     Args:
         f: Текущее значение свободной энергии F(t).
         prev_f: Значение F(t-1).
         reflex_tags: Теги критических сигналов текущего тика.
         spike_threshold: Порог всплеска F (> 0 обычно; 0 → любой рост).
+        has_new_message: Пришло ли новое сообщение оператора.
 
     Returns:
         True, если событие следует запомнить.
@@ -33,7 +37,7 @@ def is_significant_event(
     """
     if spike_threshold < 0.0:
         raise ValueError(f"spike_threshold must be >= 0, got {spike_threshold}")
-    if reflex_tags:
+    if reflex_tags or has_new_message:
         return True
     return (f - prev_f) > spike_threshold
 

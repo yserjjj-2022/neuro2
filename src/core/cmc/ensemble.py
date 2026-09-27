@@ -127,3 +127,8 @@ class CMCEnsemble:
     def n_columns(self) -> int:
         """Число колонок в ансамбле (для расчёта размерности precision)."""
         return len(self._columns)
+
+    @property
+    def column_configs(self) -> list[ColumnConfig]:
+        """Конфигурации колонок (read-only копия, порядок = индексы аттрактора)."""
+        return list(self._columns)

@@ -60,8 +60,9 @@ CLI грузит `load_dotenv()`. Векторы L2-нормируются; `Api
 ### Значимые события (Core)
 
 ```python
-def is_significant_event(f, prev_f, reflex_tags, spike_threshold) -> bool:
-    """reflex ИЛИ (f - prev_f) > spike_threshold."""
+def is_significant_event(f, prev_f, reflex_tags, spike_threshold,
+                         has_new_message=False) -> bool:
+    """reflex ИЛИ (f - prev_f) > spike_threshold ИЛИ новое сообщение (S3)."""
 
 
 def build_event_content(active_tags, reflex_tags, valence, stress) -> str:
@@ -91,7 +92,8 @@ class MemoryRouter:
     def context_embedding(self, text) -> Vector | None: ...  # кэш
     def recall_prior(self, query) -> Vector: ...  # top-1 → приор
     def maybe_store(
-        self, *, text, query, f, prev_f, valence, stress, active_tags, reflex_tags, now
+        self, *, text, query, f, prev_f, valence, stress, active_tags,
+        reflex_tags, now, has_new_message=False
     ) -> int | None: ...
 ```
 

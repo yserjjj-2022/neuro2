@@ -32,6 +32,7 @@ def _event(**overrides: object) -> TelemetryEvent:
         "memory_prior": 0.0,
         "memory_hit": False,
         "episode_stored": False,
+        "spoke": False,
         "phase": "phase1",
         "mode": "free",
     }

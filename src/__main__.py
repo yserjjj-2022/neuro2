@@ -13,8 +13,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.config import HostConfig, MemoryConfig
+from src.config import HostConfig, MemoryConfig, SpeechConfig
 from src.host.loop import HostLoop, build_host_loop
+from src.speech import (
+    ChatSession,
+    ConversationHistory,
+    SpeechController,
+    build_llm_client,
+    llm_settings_from_env,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +103,84 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Спать между тиками (реальное время ≈ dt).",
     )
+    parser.add_argument(
+        "--chat",
+        action="store_true",
+        help="Диалоговый режим: ввод оператора → ответ хоста (S3).",
+    )
+    parser.add_argument(
+        "--llm",
+        choices=("auto", "fake", "api"),
+        default="auto",
+        help="LLM-клиент речи: auto (ключ→api, иначе fake), fake, api.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Модель LLM (переопределяет LLM_MODEL из окружения).",
+    )
+    parser.add_argument(
+        "--register",
+        choices=("brief", "terse", "normal", "story"),
+        default="brief",
+        help="Речевой режим (длина ответа). По умолчанию brief.",
+    )
+    parser.add_argument(
+        "--f-threshold",
+        type=float,
+        default=1.0,
+        help="Порог F для инициативы (речь без сообщения). По умолчанию 1.0.",
+    )
+    parser.add_argument(
+        "--history-turns",
+        type=int,
+        default=20,
+        help="Глубина истории диалога (сообщений). По умолчанию 20.",
+    )
+    parser.add_argument(
+        "--reasoning",
+        action="store_true",
+        help="Включить reasoning у LLM (по умолчанию выкл; LLM — актюатор, ADR-0007).",
+    )
     return parser.parse_args(argv)
+
+
+def _run_chat(loop: HostLoop, args: argparse.Namespace) -> int:
+    """Запустить диалоговый стенд (S3).
+
+    Args:
+        loop: Собранный host loop (с включённой памятью и речью).
+        args: Аргументы CLI (llm, model, register, f_threshold).
+
+    Returns:
+        Код выхода (0 — успех).
+    """
+    settings = llm_settings_from_env()
+    model = args.model or str(settings["model"])
+    llm = build_llm_client(
+        mode=args.llm,
+        model=model,
+        base_url=str(settings["base_url"]),
+        reasoning=args.reasoning,
+    )
+    controller = SpeechController(
+        llm=llm,
+        memory=loop.memory.store if loop.memory is not None else None,
+        embedder=loop.memory.embedder if loop.memory is not None else None,
+        f_threshold=args.f_threshold,
+        default_register=args.register,
+    )
+    history = ConversationHistory(max_turns=args.history_turns)
+    session = ChatSession(loop=loop, controller=controller, history=history)
+    logger.info(
+        "Chat session started (llm=%s, model=%s). /quit to exit.", args.llm, model
+    )
+    try:
+        turns = session.run(max_turns=0)
+    finally:
+        loop.close()
+    logger.info("Chat session ended: %d turns", turns)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,8 +214,18 @@ def main(argv: list[str] | None = None) -> int:
                 embedder_mode=args.embedder,
                 db_path=str(args.db),
             ),
+            speech=SpeechConfig(
+                enabled=args.chat,
+                llm_mode=args.llm,
+                default_register=args.register,
+                f_threshold=args.f_threshold,
+                history_turns=args.history_turns,
+            ),
         )
     )
+
+    if args.chat:
+        return _run_chat(loop, args)
 
     stopping = {"flag": False}
 

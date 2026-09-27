@@ -73,6 +73,21 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `energy` | EnergyConfig() | energy |
 | `attractor` | AttractorConfig() | аттрактор |
 | `memory` | MemoryConfig() | память + эмбеддер |
+| `speech` | SpeechConfig() | речь + LLM (S3) |
+
+### SpeechConfig (S3)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | False | Включать речь (поднимается `--chat`) |
+| `llm_mode` | "auto" | auto (ключ→api, иначе fake), fake, api |
+| `f_threshold` | 1.0 | Порог F для инициативы |
+| `recall_limit` | 3 | Прецедентов в Intent-Frame |
+| `default_register` | "brief" | Речевой режим (длина ответа) |
+| `history_turns` | 20 | Глубина истории диалога |
+| `temperature` | 0.7 | Температура генерации |
+| `style` | "neutral" | Дефолтный стиль (S5 — из характера) |
+| `reasoning` | False | Reasoning у LLM (ADR-0007) |
 
 ## Инварианты
 
@@ -82,6 +97,9 @@ API-настройки эмбеддера — в окружении (`.env`), н
    бюджеты ≤0, `len(columns)<k` → ValueError.
    `MemoryConfig`: `embedder_mode∉{auto,fake,api}`, `embedding_dim<=0`,
    `prior_dim<=0`, `recall_limit<1`, `episode_spike_threshold<0` → ValueError.
+   `SpeechConfig`: `llm_mode∉{auto,fake,api}`, `default_register∉{brief,terse,
+   normal,story}`, `f_threshold<0`, `recall_limit<1`, `history_turns<0`,
+   `temperature∉[0,2]` → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 

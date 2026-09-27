@@ -119,6 +119,7 @@ class MemoryRouter:
         active_tags: tuple[str, ...],
         reflex_tags: tuple[str, ...],
         now: float,
+        has_new_message: bool = False,
     ) -> int | None:
         """Записать эпизод, если событие значимо.
 
@@ -135,6 +136,7 @@ class MemoryRouter:
             active_tags: Активные сегменты шины.
             reflex_tags: Критические сигналы.
             now: Текущее время (synthetic: tick·dt; wall: clock) → timestamp.
+            has_new_message: Пришло ли новое сообщение (значимо всегда).
 
         Returns:
             id записанного эпизода или None (незначимо / сбой).
@@ -143,7 +145,9 @@ class MemoryRouter:
             Ошибки store логируются и не пробрасываются: память не должна
             ронять тик (в отличие от прямого ``MemoryStore.store``).
         """
-        if not is_significant_event(f, prev_f, reflex_tags, self.spike_threshold):
+        if not is_significant_event(
+            f, prev_f, reflex_tags, self.spike_threshold, has_new_message
+        ):
             return None
 
         content = text or build_event_content(active_tags, reflex_tags, valence, stress)

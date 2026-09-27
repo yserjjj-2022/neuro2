@@ -31,6 +31,15 @@ class TestIsSignificantEvent:
         with pytest.raises(ValueError):
             is_significant_event(1.0, 0.0, (), -1.0)
 
+    def test_new_message_significant(self) -> None:
+        """Новое сообщение оператора — всегда значимое событие."""
+        assert is_significant_event(0.0, 0.0, (), 1.0, has_new_message=True) is True
+
+    def test_no_message_flat_not_significant(self) -> None:
+        assert (
+            is_significant_event(0.0, 0.0, (), 1.0, has_new_message=False) is False
+        )
+
 
 class TestBuildEventContent:
     def test_nonempty_and_deterministic(self) -> None:

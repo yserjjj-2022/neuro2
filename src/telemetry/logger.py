@@ -75,6 +75,7 @@ class TelemetryLogger:
         memory_prior: float = 0.0,
         memory_hit: bool = False,
         episode_stored: bool = False,
+        spoke: bool = False,
     ) -> None:
         """Записать событие в лог.
 
@@ -97,6 +98,7 @@ class TelemetryLogger:
             memory_prior: Косинус извлечённого эпизода (S2).
             memory_hit: Recall нашёл релевантный эпизод (S2).
             episode_stored: Эпизод записан на этом тике (S2).
+            spoke: Хост сгенерировал реплику на тике (S3).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -115,6 +117,7 @@ class TelemetryLogger:
             memory_prior=memory_prior,
             memory_hit=memory_hit,
             episode_stored=episode_stored,
+            spoke=spoke,
             phase=self.phase,
             mode=self.mode,
         )

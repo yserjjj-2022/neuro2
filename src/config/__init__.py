@@ -6,6 +6,7 @@ Re-exports:
     ColumnParams — single column parameters
     AttractorConfig — TaskAttractor parameters
     MemoryConfig — episodic memory + embedder parameters
+    SpeechConfig — speech + LLM parameters
 """
 
 from .params import (
@@ -14,6 +15,7 @@ from .params import (
     EnergyConfig,
     HostConfig,
     MemoryConfig,
+    SpeechConfig,
 )
 
 __all__ = [
@@ -22,4 +24,5 @@ __all__ = [
     "EnergyConfig",
     "HostConfig",
     "MemoryConfig",
+    "SpeechConfig",
 ]

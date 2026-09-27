@@ -10,6 +10,7 @@ from src.config import (
     EnergyConfig,
     HostConfig,
     MemoryConfig,
+    SpeechConfig,
 )
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
@@ -135,3 +136,37 @@ class TestMemoryConfig:
 
     def test_host_config_has_memory(self) -> None:
         assert isinstance(HostConfig().memory, MemoryConfig)
+
+
+class TestSpeechConfig:
+    """SpeechConfig: дефолты и валидация (S3)."""
+
+    def test_defaults(self) -> None:
+        cfg = SpeechConfig()
+        assert cfg.enabled is False
+        assert cfg.llm_mode == "auto"
+        assert cfg.default_register == "brief"
+        assert cfg.history_turns == 20
+
+    def test_invalid_llm_mode_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SpeechConfig(llm_mode="nope")
+
+    def test_invalid_register_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SpeechConfig(default_register="epic")
+
+    def test_invalid_temperature_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SpeechConfig(temperature=3.0)
+
+    def test_negative_threshold_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SpeechConfig(f_threshold=-1.0)
+
+    def test_bad_recall_limit_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SpeechConfig(recall_limit=0)
+
+    def test_host_config_has_speech(self) -> None:
+        assert isinstance(HostConfig().speech, SpeechConfig)

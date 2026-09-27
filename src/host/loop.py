@@ -82,6 +82,8 @@ class HostLoop:
     _last_text: str = field(default="", init=False, repr=False)
     _cached_query: np.ndarray | None = field(default=None, init=False, repr=False)
     _cached_prior: np.ndarray | None = field(default=None, init=False, repr=False)
+    last_outcome: TickOutcome | None = field(default=None, init=False, repr=False)
+    _spoke_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -205,6 +207,7 @@ class HostLoop:
         # измеряет собственные вычисления хоста.
         u_base = self.bus.step(tick, now)
         text = self.message_provider.text_at(tick) if self.message_provider else ""
+        has_new_message = bool(text) and text != self._last_text
         query = self._update_prior_if_new_text(text)
         prior = self._cached_prior
         u = np.concatenate([u_base, prior]) if prior is not None else u_base
@@ -243,6 +246,7 @@ class HostLoop:
                 active_tags=outcome.active_tags,
                 reflex_tags=outcome.reflex_tags,
                 now=now,
+                has_new_message=has_new_message,
             )
             episode_stored = stored_id is not None
 
@@ -264,8 +268,15 @@ class HostLoop:
             memory_prior=memory_prior_value,
             memory_hit=memory_hit,
             episode_stored=episode_stored,
+            spoke=self._spoke_pending,
         )
+        self._spoke_pending = False
+        self.last_outcome = outcome
         return outcome
+
+    def mark_spoke(self) -> None:
+        """Отметить, что хост сгенерировал реплику (попадёт в телеметрию)."""
+        self._spoke_pending = True
 
     def run(self, max_ticks: int) -> int:
         """Прогнать цикл: до ``max_ticks`` тиков.
