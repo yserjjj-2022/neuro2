@@ -13,7 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.config import HostConfig, MemoryConfig, SpeechConfig
+from src.config import HostConfig, MemoryConfig, PolicyConfig, SpeechConfig
 from src.host.loop import HostLoop, build_host_loop
 from src.speech import (
     ChatSession,
@@ -147,6 +147,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Печатать состояние (F/valence/stress/γ/задача/recall/дрейф) в чате.",
     )
+    parser.add_argument(
+        "--no-policy",
+        action="store_true",
+        help="Отключить policy (S4): вернуть S3-поведение should_speak в чате.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("game", "cooperative", "free"),
+        default="free",
+        help="Режим хоста (макро-контекст policy): game/cooperative/free.",
+    )
     return parser.parse_args(argv)
 
 
@@ -176,11 +187,13 @@ def _run_chat(loop: HostLoop, args: argparse.Namespace) -> int:
         default_register=args.register,
     )
     history = ConversationHistory(max_turns=args.history_turns)
+    policy = None if args.no_policy else loop.policy_config
     session = ChatSession(
         loop=loop,
         controller=controller,
         history=history,
         show_status=args.status,
+        policy=policy,
     )
     logger.info(
         "Chat session started (llm=%s, model=%s). /quit to exit.", args.llm, model
@@ -231,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
                 f_threshold=args.f_threshold,
                 history_turns=args.history_turns,
             ),
+            policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
         )
     )
 

@@ -33,6 +33,10 @@ def _event(**overrides: object) -> TelemetryEvent:
         "memory_hit": False,
         "episode_stored": False,
         "spoke": False,
+        "throttle": False,
+        "homeostasis": 0.0,
+        "policy_action": "",
+        "policy_reason": "",
         "phase": "phase1",
         "mode": "free",
     }
@@ -52,7 +56,7 @@ def test_serialize_valid(tmp_path: object) -> None:
 
 
 def test_serialize_all_s1_fields() -> None:
-    """S3: все 19 полей присутствуют в JSON."""
+    """S4: все 23 поля присутствуют в JSON."""
     data = json.loads(
         serialize_event(_event(tick=7, gamma=2.5, active_tags="cpu,battery"))
     )
@@ -74,6 +78,10 @@ def test_serialize_all_s1_fields() -> None:
         "memory_hit",
         "episode_stored",
         "spoke",
+        "throttle",
+        "homeostasis",
+        "policy_action",
+        "policy_reason",
         "phase",
         "mode",
     ):
@@ -84,16 +92,29 @@ def test_serialize_all_s1_fields() -> None:
 
 
 def test_serialize_memory_fields() -> None:
-    """S2: поля памяти сериализуются корректно."""
+    """S2/S4: поля памяти и гомеостаза сериализуются корректно."""
     data = json.loads(
         serialize_event(
-            _event(memory_prior=0.75, memory_hit=True, episode_stored=True, spoke=True)
+            _event(
+                memory_prior=0.75,
+                memory_hit=True,
+                episode_stored=True,
+                spoke=True,
+                throttle=True,
+                homeostasis=0.8,
+                policy_action="respond",
+                policy_reason="chose respond: new message",
+            )
         )
     )
     assert data["memory_prior"] == 0.75
     assert data["memory_hit"] is True
     assert data["episode_stored"] is True
     assert data["spoke"] is True
+    assert data["throttle"] is True
+    assert data["homeostasis"] == 0.8
+    assert data["policy_action"] == "respond"
+    assert "new message" in data["policy_reason"]
 
 
 def test_serialize_nan_raises() -> None:

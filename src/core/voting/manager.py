@@ -56,6 +56,11 @@ class VotingManager:
         """Последний результат vote(), None до первого вызова."""
         return self._last
 
+    @property
+    def k(self) -> int:
+        """Текущее число победителей k-WTA."""
+        return self._k
+
     def set_k(self, k: int) -> None:
         """Изменить число победителей (tuning).
 

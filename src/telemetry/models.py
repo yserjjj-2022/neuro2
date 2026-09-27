@@ -33,6 +33,10 @@ class TelemetryEvent:
         memory_hit: Recall нашёл релевантный эпизод — S2.
         episode_stored: Эпизод записан на этом тике — S2.
         spoke: Хост сгенерировал реплику на тике — S3.
+        throttle: Активен ли рефлекс-throttle на тике — S4.
+        homeostasis: Максимальное отклонение гомеостаза — S4.
+        policy_action: Выбранное policy действие ("" если не вызывалась) — S4.
+        policy_reason: Причина выбора policy (трассировка) — S4.
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
     """
@@ -54,5 +58,9 @@ class TelemetryEvent:
     memory_hit: bool
     episode_stored: bool
     spoke: bool
+    throttle: bool
+    homeostasis: float
+    policy_action: str
+    policy_reason: str
     phase: str
     mode: str

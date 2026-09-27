@@ -76,6 +76,10 @@ def behavioral_fingerprint(
         "drift_events": float(sum(1 for e in events if e["drift"])),
         "memory_hits": float(sum(1 for e in events if e.get("memory_hit"))),
         "episodes_stored": float(sum(1 for e in events if e.get("episode_stored"))),
+        "throttle_events": float(sum(1 for e in events if e.get("throttle"))),
+        "policy_events": float(
+            sum(1 for e in events if e.get("policy_action", "") != "")
+        ),
         "latency_p50_ms": float(np.percentile(latency_values, 50)),
         "latency_p95_ms": float(np.percentile(latency_values, 95)),
     }
@@ -319,3 +323,87 @@ class TestOrganismInvariants:
         assert "f_final" in fp
         assert "reflex_events" in fp
         assert "latency_p95_ms" in fp
+
+
+class TestS4Gates:
+    """Ворота S4 (VALIDATION.md §4): goal-directed, reflex, explainability."""
+
+    def test_goal_directed_via_full_loop(self, tmp_path: Path) -> None:
+        """Goal-directed: смена Preferences меняет действие без переобучения."""
+        from src.core.policy import Action, Preferences, select_action
+
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
+        loop = build_host_loop(config, meter=FakeMeter())
+        loop.run(3)
+        ctx = loop.policy_context(has_new_message=True)
+        loop.close()
+
+        assert select_action(ctx, Preferences()).chosen is Action.RESPOND
+        assert (
+            select_action(ctx, Preferences(respond_to_messages=False)).chosen
+            is not Action.RESPOND
+        )
+
+    def test_explainability_trace_present(self, tmp_path: Path) -> None:
+        """Explainability: у решения есть непустая причинная трасса."""
+        from src.core.policy import Preferences, select_action
+
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "mem.db")),
+        )
+        loop = build_host_loop(config, meter=FakeMeter())
+        loop.run(3)
+        trace = select_action(loop.policy_context(has_new_message=True), Preferences())
+        loop.close()
+
+        assert trace.reason != ""
+        assert len(trace.candidates) == 4
+        winner = next(c for c in trace.candidates if c.action is trace.chosen)
+        assert winner.value == max(c.value for c in trace.candidates)
+
+    def test_reflex_gate_in_full_loop(self, tmp_path: Path) -> None:
+        """Reflex: критический сигнал → throttle в телеметрии (≤ 1 тик)."""
+        from src.core.homeostasis import Setpoint
+
+        provider = BatteryProvider(start_level=1.0, drain_per_tick=0.01)
+        bus = SignalBus([provider])
+        columns = [
+            ColumnConfig(
+                input_dim=bus.bus_dim, state_dim=bus.bus_dim, specialization="a"
+            ),
+            ColumnConfig(
+                input_dim=bus.bus_dim, state_dim=bus.bus_dim, specialization="b"
+            ),
+        ]
+        pipeline = build_cmc_pipeline(
+            columns=columns, k=1, log_path=tmp_path / "run.jsonl"
+        )
+        writer = TelemetryWriter(log_path=tmp_path / "run.jsonl")
+        from src.core.homeostasis import Homeostat
+
+        loop = HostLoop(
+            bus=bus,
+            pipeline=pipeline,
+            logger=TelemetryLogger(writer=writer, phase="phase1", mode="free"),
+            estimator=PrecisionEstimator(dim=bus.bus_dim, window=50),
+            meter=FakeMeter(),
+            drift=DriftDetector(f_threshold=1e9, stress_threshold=1e9),
+            homeostat=Homeostat(
+                setpoints=(Setpoint(tag="battery", comfort=0.5, critical=0.9),)
+            ),
+            tick_dt=0.1,
+            clock_mode="synthetic",
+            precision_mode="ones",
+        )
+        for tick in range(91):
+            loop.step_once(tick)
+        loop.close()
+
+        events = _events(tmp_path)
+        fp = behavioral_fingerprint(events)
+        assert fp["throttle_events"] >= 1
+        assert events[-1]["throttle"] is True

@@ -1,8 +1,9 @@
-"""Core modules: CMC fabric, energy, voting, attractors.
+"""Core modules: CMC fabric, energy, voting, attractors, homeostasis.
 
 CMC (Canonical Microcircuits): L4 → L5/6 → L2/3 column dynamics.
 Voting: k-WTA lateral inhibition for column consensus.
 Attractors: multistable dynamics for task selection via short-term plasticity.
+Homeostasis: interoceptive setpoints and deviation (S4).
 Functional Core / Imperative Shell (ADR-0004) across all core/* modules.
 """
 
@@ -14,13 +15,40 @@ from .attractors import (
     compute_dwell,
 )
 from .cmc import CMCEnsemble, ColumnConfig, ColumnState, EnsembleOutput, column_step
+from .homeostasis import (
+    HomeostasisState,
+    Homeostat,
+    HomeostaticSignal,
+    Setpoint,
+    setpoint_deviation,
+)
+from .policy import (
+    Action,
+    MacroContext,
+    PolicyCandidate,
+    PolicyContext,
+    PolicyTrace,
+    Preferences,
+    evaluate_candidates,
+    select_action,
+)
 from .voting import VotingManager, VotingResult, kwta
 
 __all__ = [
+    "Action",
     "CMCEnsemble",
     "ColumnConfig",
     "ColumnState",
     "EnsembleOutput",
+    "HomeostasisState",
+    "Homeostat",
+    "HomeostaticSignal",
+    "MacroContext",
+    "PolicyCandidate",
+    "PolicyContext",
+    "PolicyTrace",
+    "Preferences",
+    "Setpoint",
     "TaskAttraction",
     "TaskAttractor",
     "VotingManager",
@@ -29,5 +57,8 @@ __all__ = [
     "check_immediate_switch",
     "column_step",
     "compute_dwell",
+    "evaluate_candidates",
     "kwta",
+    "select_action",
+    "setpoint_deviation",
 ]

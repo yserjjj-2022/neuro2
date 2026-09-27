@@ -126,6 +126,7 @@ class SpeechController:
         history: Sequence[dict] = (),
         register: str | None = None,
         new_message: bool = True,
+        goal: str | None = None,
     ) -> str | None:
         """Событийный ответ: frame → messages → LLM.
 
@@ -138,6 +139,7 @@ class SpeechController:
             history: Предыдущие сообщения диалога.
             register: Речевой режим (None → default_register).
             new_message: Пришло ли новое сообщение.
+            goal: Цель реплики из policy (S4); None → "respond" (S3).
 
         Returns:
             Текст ответа или None (не отвечаем / сбой LLM).
@@ -157,6 +159,7 @@ class SpeechController:
             task=task,
             precedents=precedents,
             register=register,
+            goal=goal or "respond",
         )
         messages = render_messages(frame, user_text, history=history)
         try:

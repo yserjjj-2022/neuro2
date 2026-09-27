@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
 from src.core.energy import FreeEnergyCalculator
+from src.core.homeostasis import Setpoint
+from src.core.policy import Preferences
 
 
 @dataclass(frozen=True)
@@ -206,9 +208,76 @@ class SpeechConfig:
         if self.history_turns < 0:
             raise ValueError(f"history_turns must be >= 0, got {self.history_turns}")
         if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError(f"temperature must be in [0, 2], got {self.temperature}")
+
+
+@dataclass(frozen=True)
+class HomeostasisConfig:
+    """Параметры гомеостаза (S4).
+
+    Attributes:
+        setpoints: Сетпоинты интероцептивных каналов (battery, resources, cpu).
+        reflex_threshold: Порог severity для критического сигнала/рефлекса.
+        throttle_k_scale: Множитель k-WTA при throttle, (0, 1].
+        throttle_dt_scale: Множитель dt при throttle, >= 1.
+    """
+
+    setpoints: tuple[Setpoint, ...] = (
+        Setpoint(tag="battery", comfort=0.5, critical=0.9),
+        Setpoint(tag="resources", comfort=0.5, critical=0.9),
+        Setpoint(tag="cpu", comfort=0.7, critical=0.9),
+    )
+    reflex_threshold: float = 0.9
+    throttle_k_scale: float = 0.5
+    throttle_dt_scale: float = 2.0
+
+    def __post_init__(self) -> None:
+        """Валидация: непустые сетпоинты, границы порогов.
+
+        Raises:
+            ValueError: Если setpoints пуст, reflex_threshold вне [0, 1],
+                throttle_k_scale вне (0, 1] или throttle_dt_scale < 1.
+        """
+        if not self.setpoints:
+            raise ValueError("setpoints must not be empty")
+        if not 0.0 <= self.reflex_threshold <= 1.0:
             raise ValueError(
-                f"temperature must be in [0, 2], got {self.temperature}"
+                f"reflex_threshold must be in [0, 1], got {self.reflex_threshold}"
             )
+        if not 0.0 < self.throttle_k_scale <= 1.0:
+            raise ValueError(
+                f"throttle_k_scale must be in (0, 1], got {self.throttle_k_scale}"
+            )
+        if self.throttle_dt_scale < 1.0:
+            raise ValueError(
+                f"throttle_dt_scale must be >= 1, got {self.throttle_dt_scale}"
+            )
+
+
+@dataclass(frozen=True)
+class PolicyConfig:
+    """Параметры policy (S4).
+
+    Attributes:
+        enabled: Включать ли policy (иначе S3-поведение: should_speak).
+        preferences: Предпочитаемые исходы (goal-directed).
+        mode: Режим хоста (макро-контекст): game/cooperative/free.
+        attention_gate: Пред-колоночная γ (проход 2; S4 — выкл).
+    """
+
+    enabled: bool = True
+    preferences: Preferences = field(default_factory=Preferences)
+    mode: str = "free"
+    attention_gate: bool = False
+
+    def __post_init__(self) -> None:
+        """Валидация режима хоста.
+
+        Raises:
+            ValueError: Если mode не из {game, cooperative, free}.
+        """
+        if self.mode not in ("game", "cooperative", "free"):
+            raise ValueError(f"mode must be game|cooperative|free, got {self.mode!r}")
 
 
 @dataclass(frozen=True)
@@ -239,6 +308,8 @@ class HostConfig:
         attractor: Параметры аттрактора.
         memory: Параметры памяти.
         speech: Параметры речи (S3).
+        homeostasis: Параметры гомеостаза (S4).
+        policy: Параметры policy (S4).
     """
 
     dt: float = 0.1
@@ -269,6 +340,8 @@ class HostConfig:
     attractor: AttractorConfig = field(default_factory=AttractorConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
+    homeostasis: HomeostasisConfig = field(default_factory=HomeostasisConfig)
+    policy: PolicyConfig = field(default_factory=PolicyConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""

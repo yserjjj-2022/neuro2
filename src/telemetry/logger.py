@@ -76,6 +76,10 @@ class TelemetryLogger:
         memory_hit: bool = False,
         episode_stored: bool = False,
         spoke: bool = False,
+        throttle: bool = False,
+        homeostasis: float = 0.0,
+        policy_action: str = "",
+        policy_reason: str = "",
     ) -> None:
         """Записать событие в лог.
 
@@ -99,6 +103,10 @@ class TelemetryLogger:
             memory_hit: Recall нашёл релевантный эпизод (S2).
             episode_stored: Эпизод записан на этом тике (S2).
             spoke: Хост сгенерировал реплику на тике (S3).
+            throttle: Активен ли рефлекс-throttle на тике (S4).
+            homeostasis: Максимальное отклонение гомеостаза (S4).
+            policy_action: Выбранное policy действие ("" если не вызывалась) (S4).
+            policy_reason: Причина выбора policy — трассировка (S4).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -118,6 +126,10 @@ class TelemetryLogger:
             memory_hit=memory_hit,
             episode_stored=episode_stored,
             spoke=spoke,
+            throttle=throttle,
+            homeostasis=homeostasis,
+            policy_action=policy_action,
+            policy_reason=policy_reason,
             phase=self.phase,
             mode=self.mode,
         )

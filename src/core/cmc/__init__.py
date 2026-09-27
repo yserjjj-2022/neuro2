@@ -6,6 +6,7 @@ Functional Core / Imperative Shell (ADR-0004):
 - CMCEnsemble — shell owning column states, aggregates per tick
 """
 
+from .attention import apply_attention, attention_gate
 from .column import column_step
 from .ensemble import CMCEnsemble
 from .models import ColumnConfig, ColumnState, EnsembleOutput
@@ -15,5 +16,7 @@ __all__ = [
     "ColumnConfig",
     "ColumnState",
     "EnsembleOutput",
+    "apply_attention",
+    "attention_gate",
     "column_step",
 ]

@@ -44,9 +44,7 @@ FALLBACK_API_KEY_ENV = "EMBEDDER_API_KEY"
 def _resolve_api_key(explicit: str | None = None) -> str | None:
     """Ключ API: явный → LLM_API_KEY → универсальный EMBEDDER_API_KEY."""
     return (
-        explicit
-        or os.environ.get(ENV_API_KEY)
-        or os.environ.get(FALLBACK_API_KEY_ENV)
+        explicit or os.environ.get(ENV_API_KEY) or os.environ.get(FALLBACK_API_KEY_ENV)
     )
 
 

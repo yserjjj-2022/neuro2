@@ -7,14 +7,18 @@ Re-exports:
     AttractorConfig — TaskAttractor parameters
     MemoryConfig — episodic memory + embedder parameters
     SpeechConfig — speech + LLM parameters
+    HomeostasisConfig — interoceptive setpoints + throttle (S4)
+    PolicyConfig — action selection parameters (S4)
 """
 
 from .params import (
     AttractorConfig,
     ColumnParams,
     EnergyConfig,
+    HomeostasisConfig,
     HostConfig,
     MemoryConfig,
+    PolicyConfig,
     SpeechConfig,
 )
 
@@ -22,7 +26,9 @@ __all__ = [
     "AttractorConfig",
     "ColumnParams",
     "EnergyConfig",
+    "HomeostasisConfig",
     "HostConfig",
     "MemoryConfig",
+    "PolicyConfig",
     "SpeechConfig",
 ]

@@ -27,11 +27,15 @@ from pathlib import Path
 
 import numpy as np
 
-from src.config import HostConfig
+from src.config import HostConfig, PolicyConfig
+from src.core.cmc import apply_attention, attention_gate
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
+from src.core.homeostasis import HomeostasisState, Homeostat
+from src.core.policy import MacroContext, PolicyContext, PolicyTrace
 from src.host.resources import ResourceMeter, ResourceProvider
 from src.host.sources import BusSegment, SignalBus, default_providers
 from src.host.text_source import TextMessageProvider
+from src.host.throttle import ThrottlePlan, plan_throttle
 from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
 from src.memory import (
     MemoryRouter,
@@ -69,6 +73,14 @@ class HostLoop:
     estimator: PrecisionEstimator
     meter: ResourceMeter
     drift: DriftDetector
+    homeostat: Homeostat | None = None
+    throttle_k_scale: float = 0.5
+    throttle_dt_scale: float = 2.0
+    throttle_severity_threshold: float = 0.9
+    attention_gate: bool = False
+    attention_gamma_ref: float = 1.0
+    attention_floor: float = 0.0
+    policy_config: PolicyConfig | None = None
     tick_dt: float = 0.01
     clock_mode: str = "synthetic"
     paced: bool = False
@@ -85,7 +97,19 @@ class HostLoop:
     last_outcome: TickOutcome | None = field(default=None, init=False, repr=False)
     last_drift: bool = field(default=False, init=False, repr=False)
     last_memory_hit: bool = field(default=False, init=False, repr=False)
+    last_homeostasis: HomeostasisState | None = field(
+        default=None, init=False, repr=False
+    )
+    last_throttle: ThrottlePlan = field(
+        default_factory=lambda: ThrottlePlan(active=False),
+        init=False,
+        repr=False,
+    )
+    last_policy_trace: PolicyTrace | None = field(default=None, init=False, repr=False)
+    _policy_action_pending: str = field(default="", init=False, repr=False)
+    _policy_reason_pending: str = field(default="", init=False, repr=False)
     _spoke_pending: bool = field(default=False, init=False, repr=False)
+    _base_k: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -101,6 +125,9 @@ class HostLoop:
             )
         if self.time_scale <= 0.0:
             raise ValueError(f"time_scale must be > 0, got {self.time_scale}")
+        # Базовое k запоминается для восстановления после throttle
+        # (throttle — обратимая регуляция, а не дрейф конфигурации).
+        self._base_k = self.pipeline.voting.k
         # Память включена, но сообщений ещё не было → нулевой приор
         # (ширина шины стабильна: prior всегда присутствует).
         if self.memory is not None and self._cached_prior is None:
@@ -136,8 +163,8 @@ class HostLoop:
         self._prev_now = now
         return dt, now
 
-    def precision(self, u: np.ndarray) -> np.ndarray:
-        """Точность γ для всех каналов.
+    def _gamma_bus(self, u: np.ndarray) -> np.ndarray:
+        """Точность γ по каналам шины (без tile по колонкам).
 
         ``variance`` — γ = 1/var по окну (PrecisionEstimator).
         ``ones`` — baseline (фоллбэк FEP, ADR-0005 §4).
@@ -146,14 +173,22 @@ class HostLoop:
             u: Вектор шины (с приором памяти) shape=(total_dim,).
 
         Returns:
+            Вектор γ shape=(total_dim,).
+        """
+        if self.precision_mode == "ones":
+            return np.ones(u.shape[0], dtype=np.float64)
+        return self.estimator.update(u)
+
+    def precision(self, u: np.ndarray) -> np.ndarray:
+        """Точность γ для всех каналов.
+
+        Args:
+            u: Вектор шины (с приором памяти) shape=(total_dim,).
+
+        Returns:
             Вектор γ shape=(N_columns * total_dim,).
         """
-        n_columns = self.pipeline.ensemble.n_columns
-        if self.precision_mode == "ones":
-            gamma_bus = np.ones(u.shape[0], dtype=np.float64)
-        else:
-            gamma_bus = self.estimator.update(u)
-        return np.tile(gamma_bus, n_columns)
+        return np.tile(self._gamma_bus(u), self.pipeline.ensemble.n_columns)
 
     def _update_prior_if_new_text(self, text: str) -> np.ndarray | None:
         """Обновить приор памяти только при новом тексте (event-triggered).
@@ -208,6 +243,33 @@ class HostLoop:
         # ресурсную латентность: сеть — внешняя нагрузка, а «тахикардия»
         # измеряет собственные вычисления хоста.
         u_base = self.bus.step(tick, now)
+
+        # Рефлекс (S4): критический интеро-сигнал → throttle в этом же тике,
+        # минуя policy, dwell и attractor (манифест §3.К). Гомеостаз оценивает
+        # сигналы прошлого тика; реакция ≤ 1 тик (VALIDATION §2.3).
+        homeostasis = (
+            self.homeostat.evaluate(self.bus.last_signals)
+            if self.homeostat is not None
+            else None
+        )
+        throttle = (
+            plan_throttle(
+                homeostasis,
+                severity_threshold=self.throttle_severity_threshold,
+                k_scale=self.throttle_k_scale,
+                dt_scale=self.throttle_dt_scale,
+            )
+            if homeostasis is not None
+            else ThrottlePlan(active=False)
+        )
+        if throttle.active:
+            dt *= throttle.dt_scale
+            k_eff = max(1, round(self._base_k * throttle.k_scale))
+            self.pipeline.voting.set_k(k_eff)
+        else:
+            # Обратимость: восстановить базовое k, когда сигнал нормализовался.
+            self.pipeline.voting.set_k(self._base_k)
+
         text = self.message_provider.text_at(tick) if self.message_provider else ""
         has_new_message = bool(text) and text != self._last_text
         query = self._update_prior_if_new_text(text)
@@ -215,7 +277,19 @@ class HostLoop:
         u = np.concatenate([u_base, prior]) if prior is not None else u_base
 
         compute_start = time.perf_counter()
-        gamma = self.precision(u)
+        gamma_bus = self._gamma_bus(u)
+        u_eff = u
+        if self.attention_gate:
+            # Пред-колоночный барьер внимания (S4, ADR-0005 §2): доверие
+            # каналу γ управляет прохождением входа. Обратимо: gate=False →
+            # u_eff == u (контур S1–S3).
+            weights = attention_gate(
+                gamma_bus,
+                gamma_ref=self.attention_gamma_ref,
+                floor=self.attention_floor,
+            )
+            u_eff = apply_attention(u, weights)
+        gamma = np.tile(gamma_bus, self.pipeline.ensemble.n_columns)
         segments = self.bus.segments
         if self.memory is not None:
             segments = segments + (
@@ -227,7 +301,7 @@ class HostLoop:
                 ),
             )
         reflex_tags = tuple(s.tag for s in self.bus.last_signals if s.is_reflex)
-        outcome = self.pipeline.tick(u, gamma, dt, segments, reflex_tags)
+        outcome = self.pipeline.tick(u_eff, gamma, dt, segments, reflex_tags)
         check_finite(outcome.result)
         drift = self.drift.update(outcome.result)
         self.meter.record_tick(time.perf_counter() - compute_start)
@@ -271,16 +345,78 @@ class HostLoop:
             memory_hit=memory_hit,
             episode_stored=episode_stored,
             spoke=self._spoke_pending,
+            throttle=throttle.active,
+            homeostasis=(homeostasis.max_deviation if homeostasis is not None else 0.0),
+            policy_action=self._policy_action_pending,
+            policy_reason=self._policy_reason_pending,
         )
         self._spoke_pending = False
+        self._policy_action_pending = ""
+        self._policy_reason_pending = ""
         self.last_outcome = outcome
         self.last_drift = drift
         self.last_memory_hit = memory_hit
+        self.last_homeostasis = homeostasis
+        self.last_throttle = throttle
         return outcome
 
     def mark_spoke(self) -> None:
         """Отметить, что хост сгенерировал реплику (попадёт в телеметрию)."""
         self._spoke_pending = True
+
+    def policy_context(
+        self, *, has_new_message: bool, mode: str = "free"
+    ) -> PolicyContext:
+        """Собрать расширяемый контекст policy из состояния хоста.
+
+        Policy-слой (S4) решает речевое действие вне тика; loop поставляет
+        ему актуальное состояние. Метакогниция (S6) добавится новым полем
+        ``PolicyContext`` без изменения этого метода.
+
+        Args:
+            has_new_message: Пришло ли новое сообщение оператора.
+            mode: Режим хоста (макро-контекст).
+
+        Returns:
+            PolicyContext с F/аффектом/задачей/гомеостазом.
+        """
+        outcome = self.last_outcome
+        homeostasis = self.last_homeostasis
+        if homeostasis is None:
+            homeostasis = HomeostasisState(
+                signals=(), max_deviation=0.0, severity=0.0, is_critical=False
+            )
+        macro = MacroContext(task=self.active_task(), mode=mode)
+        return PolicyContext(
+            f=outcome.result.f if outcome is not None else 0.0,
+            valence=outcome.result.valence if outcome is not None else 0.0,
+            stress=outcome.result.allostatic_stress if outcome is not None else 0.0,
+            task=macro.task,
+            homeostasis=homeostasis,
+            has_new_message=has_new_message,
+            mode=macro.mode,
+        )
+
+    def active_task(self) -> str:
+        """Тег активной задачи (специализация колонки-аттрактора)."""
+        mask = self.pipeline.attractor.current_mask
+        if mask is None:
+            return "none"
+        idx = int(np.argmax(mask))
+        columns = self.pipeline.ensemble.column_configs
+        if 0 <= idx < len(columns):
+            return columns[idx].specialization
+        return "none"
+
+    def record_policy(self, trace: PolicyTrace) -> None:
+        """Зафиксировать решение policy для телеметрии следующего тика.
+
+        Args:
+            trace: Причинная трасса решения (explainability, S4).
+        """
+        self.last_policy_trace = trace
+        self._policy_action_pending = trace.chosen.value
+        self._policy_reason_pending = trace.reason
 
     def run(self, max_ticks: int) -> int:
         """Прогнать цикл: до ``max_ticks`` тиков.
@@ -400,6 +536,11 @@ def build_host_loop(
     writer = TelemetryWriter(log_path=Path(config.log_path))
     logger = TelemetryLogger(writer=writer, phase="phase1", mode="free")
 
+    homeostat = Homeostat(
+        setpoints=config.homeostasis.setpoints,
+        reflex_threshold=config.homeostasis.reflex_threshold,
+    )
+
     return HostLoop(
         bus=bus,
         pipeline=pipeline,
@@ -415,6 +556,12 @@ def build_host_loop(
             f_threshold=config.drift_f_threshold,
             stress_threshold=config.drift_stress_threshold,
         ),
+        homeostat=homeostat,
+        throttle_k_scale=config.homeostasis.throttle_k_scale,
+        throttle_dt_scale=config.homeostasis.throttle_dt_scale,
+        throttle_severity_threshold=config.homeostasis.reflex_threshold,
+        attention_gate=config.policy.attention_gate,
+        policy_config=config.policy,
         tick_dt=config.dt,
         clock_mode=config.clock_mode,
         paced=config.paced,
