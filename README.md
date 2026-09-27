@@ -26,6 +26,10 @@ cp .env.example .env   # заполнить EMBEDDER_API_KEY (RouterAI)
 `EMBEDDER_DIM`. Без ключа `embedder_mode="auto"` использует детерминированный
 fake-эмбеддер (тесты/replay).
 
+Ключ RouterAI — **универсальный** (один на все модели): LLM берёт
+`LLM_API_KEY`, а при его отсутствии — `EMBEDDER_API_KEY`. Модель чата — в
+`LLM_MODEL` (дефолт `deepseek/deepseek-v4.1-flash`).
+
 ## Структура
 
 ```
@@ -37,7 +41,7 @@ src/
 │   └── attractors/ # Task attractors (STP)
 ├── host/           # Обвязка: wiring (pipeline), sources (сенсорика)
 ├── memory/         # SQLite + sqlite-vec
-├── speech/         # Intent-Frame, Steering (не реализовано)
+├── speech/         # Intent-Frame, LLM-актюатор, диалог (S3)
 ├── mcp/            # Контракт сигналов; MCP transport (не реализован)
 ├── tm/             # Theory of Mind (не реализовано)
 ├── telemetry/      # Логирование, самодиагностика
@@ -50,9 +54,10 @@ Host loop собран и работает: `u(t) → CMC → voting/attractors 
 telemetry (JSONL)`. **S1 (честные сигналы) завершён:** единая временная база,
 сглаженная valence, настоящая γ, ресурсная интероцепция, guard дрейфа.
 **S2 (непрерывность) завершён:** эмбеддер, эпизодическая память подключена
-(recall → приор в шину, запись на значимых событиях). 348 тестов.
+(recall → приор в шину, запись на значимых событиях). **S3 (голос):**
+Intent-Frame + речевые режимы, event-triggered LLM (речевой актюатор,
+reasoning выключен — ADR-0007), история диалога, `--chat`. 431 тест.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
-Далее — S3 (голос: Intent-Frame + event-triggered LLM).
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
 программирование поведения.
@@ -64,6 +69,17 @@ uv run python -m src --ticks 100 --log run.jsonl --db host_memory.db
 ```
 
 `--ticks 0` — бесконечный цикл до Ctrl+C. Полный список: `--help`.
+
+Диалоговый режим (S3):
+
+```bash
+uv run python -m src --chat --llm auto --db host_memory.db
+```
+
+`--llm auto` берёт реальную модель при наличии ключа, иначе детерминированный
+fake. Команды в чате: `/clear` (очистить историю), `/quit` (выход).
+`--register brief|terse|normal|story` — длина ответа; `--reasoning` включает
+reasoning у модели (по умолчанию выкл).
 
 ## Лицензия
 

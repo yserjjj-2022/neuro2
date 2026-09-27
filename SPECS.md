@@ -10,7 +10,7 @@
 - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S6
 - [`VALIDATION.md`](VALIDATION.md) — проверка и ворота
 - [`BACKLOG.md`](BACKLOG.md) — задачи
-- [`adr/`](adr/) — Architecture Decision Records (0001–0006)
+- [`adr/`](adr/) — Architecture Decision Records (0001–0007)
 
 ---
 
@@ -23,13 +23,13 @@
 | `core/voting` | [SPEC](src/core/voting/SPEC.md) | [PLAN](src/core/voting/PLAN.md) | [README](src/core/voting/README.md) | ✅ реализовано | S1 |
 | `core/attractors` | [SPEC](src/core/attractors/SPEC.md) | [PLAN](src/core/attractors/PLAN.md) | [README](src/core/attractors/README.md) | ✅ реализовано (опережение) | S4 |
 | `memory` | [SPEC](src/memory/SPEC.md) | [PLAN](src/memory/PLAN.md) | [README](src/memory/README.md) | ✅ store/recall + эмбеддер/приор/роутер (S2) | S2 |
-| `telemetry` | [SPEC](src/telemetry/SPEC.md) | [PLAN](src/telemetry/PLAN.md) | [README](src/telemetry/README.md) | ✅ реализовано (18 полей) | S1/S2 |
+| `telemetry` | [SPEC](src/telemetry/SPEC.md) | [PLAN](src/telemetry/PLAN.md) | [README](src/telemetry/README.md) | ✅ реализовано (19 полей) | S1/S2/S3 |
 | `mcp` | [SPEC](src/mcp/SPEC.md) | [PLAN](src/mcp/PLAN.md) | [README](src/mcp/README.md) | 🟡 контракт; transport ✗ | S1/S2 |
 | `host` | [SPEC](src/host/SPEC.md) | [PLAN](src/host/PLAN.md) | [README](src/host/README.md) | ✅ реализовано (S1/S2) | S1/S2 |
-| `config` | [SPEC](src/config/SPEC.md) | [PLAN](src/config/PLAN.md) | [README](src/config/README.md) | ✅ реализовано (S1/S2) | S1/S2 |
-| `speech` | — | — | [README](src/speech/README.md) | ✗ не начато | S3 |
+| `config` | [SPEC](src/config/SPEC.md) | [PLAN](src/config/PLAN.md) | [README](src/config/README.md) | ✅ реализовано (S1/S2/S3) | S1/S2/S3 |
+| `speech` | [SPEC](src/speech/SPEC.md) | [PLAN](src/speech/PLAN.md) | [README](src/speech/README.md) | ✅ реализовано (S3) | S3 |
 | `tm` | — | — | [README](src/tm/README.md) | ✗ не начато | S5 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (222) | все |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (431) | все |
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
