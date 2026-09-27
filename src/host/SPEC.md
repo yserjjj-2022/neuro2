@@ -9,28 +9,51 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 - `sources.py` — провайдеры сигналов → `u(t)`, карта сегментов, `tags_above_threshold`.
 - `wiring.py` — чистая композиция `CMCPipeline` → `TickOutcome` (без I/O).
 - `resources.py` — `ResourceMeter` + `ResourceProvider` (интероцепция ресурсов).
-- `loop.py` — `HostLoop`: время, precision, ресурсы, guard, drift, телеметрия.
+- `throttle.py` — `ThrottlePlan` + `plan_throttle` (рефлекс-throttle, S4).
+- `gate.py` — `CapabilityGate` + tiers (единая точка side-effect, S4 заготовка).
+- `control.py` — `ControlChannel` (status/pause/resume/step, S4).
+- `loop.py` — `HostLoop`: время, precision, гомеостаз, throttle, attention,
+  ресурсы, guard, drift, policy-контекст, телеметрия.
 
-См. ADR-0006 (временные шкалы), `stages/S1_SPEC.md`.
+См. ADR-0006 (временные шкалы), `stages/S1_SPEC.md`, `stages/S4_SPEC.md`.
 
-## Поток одного тика (S2)
+## Поток одного тика (S4)
 
 ```
 dt, now = time source (synthetic: tick·tick_dt·time_scale; wall: measured)
 u_base  = SignalBus.step(tick, now)
-text    = message_provider.text_at(tick)      # S2: коммуникативный вход
-# Событийно: эмбеддинг+recall только при смене текста (не каждый тик)
+# S4 рефлекс: критический интеро-сигнал → throttle в этом же тике
+homeo   = homeostat.evaluate(bus.last_signals)     # S4
+throttle= plan_throttle(homeo)                     # S4
+if throttle.active: dt *= dt_scale; voting.set_k(...)  # S4
+text    = message_provider.text_at(tick)           # S2
 if text != last_text:
-    query = memory.context_embedding(text)     # S2 (event-triggered)
-    prior = memory.recall_prior(query)         # S2
-u       = concat(u_base, prior)                # S2: total_dim = bus_dim + prior_dim
+    query = memory.context_embedding(text)         # S2 (event-triggered)
+    prior = memory.recall_prior(query)             # S2
+u       = concat(u_base, prior)                    # S2
 γ       = PrecisionEstimator.update(u)  (variance) или ones (baseline)
-outcome = pipeline.tick(u, γ, dt, segments, reflex_tags)
+if attention_gate: u_eff = u · a(γ)                # S4: пред-колоночный барьер
+outcome = pipeline.tick(u_eff, γ, dt, segments, reflex_tags)
 check_finite(outcome.result)            # HostIntegrityError при NaN/inf
 drift   = DriftDetector.update(outcome.result)
 stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
-telemetry.log(...)                      # loop владеет writer'ом
+telemetry.log(..., throttle, homeostasis, policy_action, policy_reason)
 ```
+
+**Рефлекс ≤ 1 тик** (S4): `homeostat.evaluate` читает сигналы текущего тика
+(severity отражает метрики предыдущего — `ResourceProvider`), throttle
+применяется немедленно, до `pipeline.tick` (манифест §3.К, VALIDATION §2.3).
+Throttle обратим: базовое `k` восстанавливается при `active=False`; порог
+берётся из `HomeostasisConfig.reflex_threshold`.
+
+**Пред-колоночный барьер** (S4 проход 2): при `attention_gate=True` вход
+аттенюируется весами `a(γ)` (`cmc/attention.py`) — доверие каналу управляет
+прохождением. `attention_gate=False` → `u_eff == u` (S1–S3).
+
+**Policy-контекст** (S4): `loop.policy_context(...)` собирает `PolicyContext`
+(через `MacroContext`: task + mode) для речевого решения вне тика;
+`loop.record_policy(trace)` фиксирует решение в телеметрию следующего тика
+(explainability).
 
 **Коммуникативный вход — событийный** (манифест §3.Е, ADR-0006): тик —
 непрерывный аффективный контур (циркадное, батарея, ресурсы), а текст
@@ -129,6 +152,10 @@ class ResourceProvider:
 @dataclass
 class HostLoop:
     bus, pipeline, logger, estimator, meter, drift
+    homeostat: Homeostat | None = None          # S4
+    throttle_k_scale: float = 0.5               # S4
+    throttle_dt_scale: float = 2.0              # S4
+    policy_config: PolicyConfig | None = None   # S4
     tick_dt: float = 0.01
     clock_mode: str = "synthetic"
     paced: bool = False
@@ -139,9 +166,50 @@ class HostLoop:
     def step_once(self, tick) -> TickOutcome: ...
     def run(self, max_ticks) -> int: ...
     def close(self) -> None: ...
+    # S4:
+    def policy_context(self, *, has_new_message, mode="free") -> PolicyContext: ...
+    def active_task(self) -> str: ...
+    def record_policy(self, trace: PolicyTrace) -> None: ...
 ```
 
-`build_host_loop(config, meter=None)` — колонки под фактический `bus_dim`.
+`build_host_loop(config, meter=None)` — колонки под фактический `bus_dim`,
+гомеостат из `config.homeostasis`, `policy_config` из `config.policy`.
+
+## CapabilityGate (gate.py, S4 заготовка)
+
+```python
+class CapabilityTier(Enum):
+    T0 = "observation"; T1 = "speech"; T2 = "hitl_action"
+    T3 = "autonomous_reversible"; T4 = "bounded_irreversible"
+
+
+class CapabilityGate:
+    def __init__(self, max_tier=CapabilityTier.T1) -> None: ...
+    def request(self, req: ActionRequest) -> GateDecision: ...
+```
+
+Единая точка side-effect (ADR-0005 §9). Fail-safe deny: `tier > max_tier`
+или необратимое без HITL-токена → отказ. Речь (T1, обратимая) проходит через
+gate для аудита; внешних необратимых действий на S4 нет.
+
+## ControlChannel (control.py, S4 минимальный)
+
+```python
+@dataclass
+class ControlChannel:
+    loop: HostLoop
+    paused: bool = False
+    tick: int = 0
+    def status(self) -> str: ...
+    def pause(self) -> None: ...
+    def resume(self) -> None: ...
+    def step(self, n=1) -> int: ...
+    def run(self, max_ticks=0) -> int: ...
+```
+
+Оперативный контроль (ADR-0005 §8). `step` работает и на паузе (ручное
+наблюдение рефлекса); `status` переиспользует `format_status`. Расширение
+(inject/set/snapshot/restore/freeze/kill) — позже.
 
 ## Инварианты
 
@@ -150,7 +218,11 @@ class HostLoop:
 3. `time_scale` масштабирует субъективное время (1.0 = жизнь).
 4. Непрерывность: эмоциональный контур всегда включён (ADR-0006).
 5. Non-finite → HostIntegrityError (fail-fast).
-6. Телеметрия: 15 плоских полей.
+6. Телеметрия: 23 плоских поля (S4).
+7. **Рефлекс ≤ 1 тик:** критический сигнал → throttle в том же тике.
+8. **Обратимость:** throttle восстанавливает базовое `k` при `active=False`.
+9. **Обратная совместимость:** `homeostat=None` → throttle неактивен;
+   `policy_config=None`/`attention_gate=False` → контур S1–S3.
 
 ## Критерии приёмки (S1)
 
@@ -165,8 +237,9 @@ class HostLoop:
 
 - Реальные интеграции (datetime/psutil/MCP) — позже
 - Проекции колонок (reads) — S2+
-- Рациональный контур event-triggered — S3/S4
-- Пред-колоночная γ — S4
+- Внешние действия / capability gate в полном виде (T2/HITL) — S5/S6
+- Полный control channel (inject/set/snapshot/restore/freeze/kill) — позже
+- Полный обход attractor/dwell рефлексом — BACKLOG (техдолг)
 
 ## Open Questions
 

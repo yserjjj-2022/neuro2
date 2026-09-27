@@ -1,7 +1,7 @@
 # Speech
 
-Речевой актюатор (S3). Превращает состояние хоста в реплику; **не рассуждает**
-(ADR-0007: LLM — зона Брока, не центр принятия решений).
+Речевой актюатор (S3, + goal из policy S4). Превращает состояние хоста в
+реплику; **не рассуждает** (ADR-0007: LLM — зона Брока, не центр решений).
 
 Трек (манифест §4, ADR-0003):
 - **Б1 (S3, реализовано):** Intent-Frame → облачный LLM API
@@ -16,7 +16,7 @@
 | `history.py` | `ConversationHistory` — буфер диалога |
 | `llm.py` | LLM-клиенты (fake/api) + фабрика (env `LLM_*`) |
 | `controller.py` | `should_speak` + `SpeechController` (recall → frame → LLM) |
-| `chat.py` | `ChatSession` — CLI-стенд (`/clear`, `/quit`) |
+| `chat.py` | `ChatSession` — CLI-стенд (`/clear`, `/quit`) + policy (S4) |
 
 ## Запуск
 
@@ -28,6 +28,8 @@ uv run python -m src --chat --llm auto --db host_memory.db
 `--register brief|terse|normal|story` — длина ответа.
 `--reasoning` — включить reasoning (по умолчанию выкл).
 `--status` — печатать состояние хоста перед каждой репликой.
+`--no-policy` — S3-поведение (should_speak) вместо policy (S4).
+`--mode game|cooperative|free` — режим хоста (макро-контекст policy).
 
 Ключ: `LLM_API_KEY`, при отсутствии — универсальный `EMBEDDER_API_KEY`.
 

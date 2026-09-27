@@ -9,10 +9,11 @@ S1: событие расширено до 15 полей — сопоставл�
 reflex, ресурсы, drift.
 S2: +3 поля памяти (prior/hit/stored) = 18.
 S3: +`spoke` = 19.
+S4: +4 поля (throttle/homeostasis/policy_action/policy_reason) = 23.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 19 полей)
+### TelemetryEvent (frozen dataclass, 23 поля)
 
 ```python
 @dataclass(frozen=True)
@@ -34,6 +35,10 @@ class TelemetryEvent:
     memory_hit: bool  # recall нашёл эпизод (S2)
     episode_stored: bool  # эпизод записан на тике (S2)
     spoke: bool  # хост сгенерировал реплику (S3)
+    throttle: bool  # активен ли рефлекс-throttle (S4)
+    homeostasis: float  # max_deviation гомеостаза (S4)
+    policy_action: str  # выбранное действие policy (S4)
+    policy_reason: str  # причинная трассировка решения (S4)
     phase: str
     mode: str
 ```
@@ -80,6 +85,10 @@ def log(
     memory_hit=False,
     episode_stored=False,
     spoke=False,
+    throttle=False,
+    homeostasis=0.0,
+    policy_action="",
+    policy_reason="",
 ) -> None: ...
 ```
 
@@ -93,9 +102,9 @@ def log(
 4. **Flush после записи** (crash-safety).
 5. **DI через Protocol** `SupportsWrite`.
 
-## Критерии приёмки (S1+S2+S3)
+## Критерии приёмки (S1+S2+S3+S4)
 
-- [x] `TelemetryEvent` — 19 полей, все типизированы
+- [x] `TelemetryEvent` — 23 поля, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)

@@ -74,6 +74,8 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `attractor` | AttractorConfig() | аттрактор |
 | `memory` | MemoryConfig() | память + эмбеддер |
 | `speech` | SpeechConfig() | речь + LLM (S3) |
+| `homeostasis` | HomeostasisConfig() | гомеостаз + throttle (S4) |
+| `policy` | PolicyConfig() | выбор действия (S4) |
 
 ### SpeechConfig (S3)
 
@@ -89,6 +91,24 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `style` | "neutral" | Дефолтный стиль (S5 — из характера) |
 | `reasoning` | False | Reasoning у LLM (ADR-0007) |
 
+### HomeostasisConfig (S4)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `setpoints` | battery/resources/cpu | Сетепоинты каналов |
+| `reflex_threshold` | 0.9 | Порог критического сигнала |
+| `throttle_k_scale` | 0.5 | Множитель k при throttle |
+| `throttle_dt_scale` | 2.0 | Множитель dt при throttle |
+
+### PolicyConfig (S4)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | True | Включать policy (иначе S3-поведение) |
+| `preferences` | Preferences() | Предпочитаемые исходы |
+| `mode` | "free" | Режим хоста (game/cooperative/free) |
+| `attention_gate` | False | Пред-колоночная γ (проход 2) |
+
 ## Инварианты
 
 1. Валидация fail-fast: `k<1`, `dt<=0`,
@@ -100,6 +120,9 @@ API-настройки эмбеддера — в окружении (`.env`), н
    `SpeechConfig`: `llm_mode∉{auto,fake,api}`, `default_register∉{brief,terse,
    normal,story}`, `f_threshold<0`, `recall_limit<1`, `history_turns<0`,
    `temperature∉[0,2]` → ValueError.
+   `HomeostasisConfig`: пустые `setpoints`, `reflex_threshold∉[0,1]`,
+   `throttle_k_scale∉(0,1]`, `throttle_dt_scale<1` → ValueError.
+   `PolicyConfig`: `mode∉{game,cooperative,free}` → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 

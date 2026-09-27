@@ -15,29 +15,21 @@
 
 ## Публичный интерфейс
 
-### Формула динамики колонки (Фаза 1)
+### attention_gate / apply_attention (чистые функции, Functional Core, S4)
 
+```python
+def attention_gate(gamma, gamma_ref=1.0, floor=0.0) -> Vector:
+    """a(γ) = floor + (1 - floor)·γ/(γ + gamma_ref), ∈ [floor, 1)."""
+
+
+def apply_attention(u, weights) -> Vector:
+    """u_eff = u · a (покомпонентно, без мутации входа)."""
 ```
-x(t) = x(t-1) + α · (u(t) − x(t-1))
-e(t) = u(t) − x(t)
-```
 
-где:
-- `x(t)` — состояние L5/6 (экспоненциальное скользящее среднее входа)
-- `u(t)` — вход L4 (вектор восприятия колонки)
-- `e(t)` — ошибка предсказания L2/3 (для energy)
-- `α` — скорость обновления состояния, `α ∈ [0, 1]` (параметризуемая)
-
-Свойства:
-- При стабильном входе `u(t) = const`: `x(t) → u`, `e(t) → 0` (геометрическая сходимость)
-- `α = 0`: состояние не обновляется, `e(t) = u(t) − x(0)`
-- `α = 1`: мгновенное копирование входа, `e(t) = 0`
-- Начальное состояние: `x(0) = 0`, `e(0) = u(0)`
-
-**Пограничные случаи:**
-- `u.shape != x.shape` → `ValueError` (fail-fast, до вычислений)
-- `α < 0` или `α > 1` → `ValueError` при создании конфига (fail-fast, не клиппинг)
-- `input_dim <= 0` или `state_dim <= 0` → `ValueError` при создании конфига
+Пред-колоночный барьер внимания (манифест §2, ADR-0005 §2): доверие каналу
+γ управляет прохождением входа. Низкая γ (шумный канал) аттенюируется,
+высокая — проходит. Применяется в host loop при `attention_gate=True`;
+иначе `u_eff == u` (контур S1–S3).
 
 ### ColumnConfig (frozen dataclass, Functional Core)
 
@@ -46,10 +38,12 @@ e(t) = u(t) − x(t)
 class ColumnConfig:
     """Конфигурация одной колонки. Только параметры — состояние не здесь."""
 
-    input_dim: int           # Размерность входа L4
-    state_dim: int           # Размерность состояния L5/6
-    specialization: str = "general"  # Тег: "tone", "rhythm", "meaning", "tom", "mcp", ...
-    alpha: float = 0.1       # Скорость обновления состояния, α ∈ [0, 1]
+    input_dim: int  # Размерность входа L4
+    state_dim: int  # Размерность состояния L5/6
+    specialization: str = (
+        "general"  # Тег: "tone", "rhythm", "meaning", "tom", "mcp", ...
+    )
+    alpha: float = 0.1  # Скорость обновления состояния, α ∈ [0, 1]
 ```
 
 Note:
@@ -64,8 +58,8 @@ Note:
 class ColumnState:
     """Иммутабельный снимок состояния колонки: x(t) и e(t)."""
 
-    x: np.ndarray            # Состояние L5/6, shape == (state_dim,)
-    e: np.ndarray            # Ошибка предсказания L2/3, shape == (state_dim,)
+    x: np.ndarray  # Состояние L5/6, shape == (state_dim,)
+    e: np.ndarray  # Ошибка предсказания L2/3, shape == (state_dim,)
 ```
 
 Note:
@@ -110,9 +104,9 @@ Note:
 class EnsembleOutput:
     """Снимок всего ансамбля после step()."""
 
-    errors: np.ndarray       # e(t) всех колонок, shape == (N, input_dim)
-    states: np.ndarray       # x(t) всех колонок, shape == (N, state_dim)
-    active: int              # Число активных колонок (для telemetry active_columns)
+    errors: np.ndarray  # e(t) всех колонок, shape == (N, input_dim)
+    states: np.ndarray  # x(t) всех колонок, shape == (N, state_dim)
+    active: int  # Число активных колонок (для telemetry active_columns)
 ```
 
 ### CMCEnsemble (Imperative Shell)

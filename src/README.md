@@ -4,10 +4,10 @@
 
 ```
 src/
-├── core/       # Колоночное ядро: CMC, energy, voting, attractors
-├── host/       # Обвязка: wiring, sources (сенсорика), loop (host loop)
+├── core/       # Ядро: CMC, energy, voting, attractors, homeostasis, policy
+├── host/       # Обвязка: wiring, sources, loop, throttle (S4)
 ├── memory/     # Эпизодическая память (SQLite + sqlite-vec)
-├── speech/     # Речевой актюатор (не реализовано)
+├── speech/     # Речевой актюатор (S3, + goal из policy S4)
 ├── mcp/        # Сенсорика/действия MCP (пока только контракт сигналов)
 ├── tm/         # Theory of Mind (не реализовано)
 ├── telemetry/  # JSONL-логирование состояния

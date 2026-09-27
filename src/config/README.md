@@ -8,8 +8,12 @@
 S2: `MemoryConfig` — эмбеддер (`embedder_mode` auto/fake/api), БД памяти,
 порог записи эпизода, `prior_dim`.
 
+S3: `SpeechConfig` — речь/LLM (register, f_threshold, history_turns, ...).
+S4: `HomeostasisConfig` — сетепоинты battery/resources/cpu, порог рефлекса,
+множители throttle; `PolicyConfig` — `Preferences`, режим хоста, attention_gate.
+
 `HostConfig` собирает `EnergyConfig` + `ColumnParams` + `AttractorConfig` +
-`MemoryConfig` и прокидывается в `build_host_loop`. Значения — стартовые
-(калибровка S1–S2).
+`MemoryConfig` + `SpeechConfig` + `HomeostasisConfig` + `PolicyConfig` и
+прокидывается в `build_host_loop`. Значения — стартовые (калибровка S1–S4).
 
 См. `SPEC.md`, `PLAN.md` и ADR-0006 (временные шкалы).

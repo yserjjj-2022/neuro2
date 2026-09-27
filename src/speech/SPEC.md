@@ -44,10 +44,22 @@ class IntentFrame:
 
 def describe_affect(valence: float, stress: float) -> str: ...
 
-def build_intent_frame(*, f, valence, stress, task, precedents=(),
-                       goal="respond", register="brief", style="neutral") -> IntentFrame: ...
+
+def build_intent_frame(
+    *,
+    f,
+    valence,
+    stress,
+    task,
+    precedents=(),
+    goal="respond",
+    register="brief",
+    style="neutral",
+) -> IntentFrame: ...
+
 
 def render_messages(frame, user_text, history=()) -> list[dict]: ...
+
 
 def register_max_tokens(register: str) -> int: ...
 ```
@@ -87,26 +99,40 @@ class SpeechDecision:
     speak: bool
     reason: str
 
+
 def should_speak(*, new_message, f, f_threshold) -> SpeechDecision: ...
+
 
 class SpeechController:
     def __init__(self, llm, memory=None, embedder=None, f_threshold=1.0,
                  recall_limit=3, default_register="brief") -> None: ...
     def recall_precedents(self, user_text: str) -> tuple[str, ...]: ...
     def respond(self, *, user_text, f, valence, stress, task, history=(),
-                register=None, new_message=True) -> str | None: ...
+                register=None, new_message=True, goal=None) -> str | None: ...
 ```
 
 Новое сообщение → всегда отвечаем; иначе — инициатива при F > порога.
 Ошибки LLM/recall → `None` + лог (речь не роняет тик).
 
+`goal` (S4) — цель реплики из policy (`respond`/`initiative`/`identify_partner`);
+`None` → `"respond"` (S3-совместимость). `ChatSession` при включённой policy
+вызывает `select_action` и передаёт цель; `SILENT` → `[хост промолчал]`.
+Рефлекс-throttle (`llm_gate`) блокирует инициативу, но не ответ на сообщение.
+
 ## Shell: ChatSession
 
 ```python
 class ChatSession:
-    def __init__(self, loop, controller, history=None,
-                 input_fn=input, output_fn=print, ticks_per_turn=3,
-                 show_status=False) -> None: ...
+    def __init__(
+        self,
+        loop,
+        controller,
+        history=None,
+        input_fn=input,
+        output_fn=print,
+        ticks_per_turn=3,
+        show_status=False,
+    ) -> None: ...
     def run(self, max_turns: int = 0) -> int: ...
 ```
 
