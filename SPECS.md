@@ -10,7 +10,7 @@
 - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S6
 - [`VALIDATION.md`](VALIDATION.md) — проверка и ворота
 - [`BACKLOG.md`](BACKLOG.md) — задачи
-- [`adr/`](adr/) — Architecture Decision Records (0001–0007)
+- [`adr/`](adr/) — Architecture Decision Records (0001–0008)
 
 ---
 
