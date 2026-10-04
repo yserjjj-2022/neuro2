@@ -9,6 +9,24 @@ Functional Core / Imperative Shell (ADR-0004):
 """
 
 from .models import SignalCategory, SignalSource
+from .probe import (
+    Affordance,
+    AffordanceMap,
+    ProbeRequest,
+    ProbeResult,
+    default_affordances,
+    select_affordance,
+)
 from .registry import SignalRegistry
 
-__all__ = ["SignalCategory", "SignalRegistry", "SignalSource"]
+__all__ = [
+    "Affordance",
+    "AffordanceMap",
+    "ProbeRequest",
+    "ProbeResult",
+    "SignalCategory",
+    "SignalRegistry",
+    "SignalSource",
+    "default_affordances",
+    "select_affordance",
+]

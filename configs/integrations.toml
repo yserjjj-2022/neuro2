@@ -1,0 +1,33 @@
+# Пример override реестра интеграций (ADR-0011 §4).
+# Загружается поверх default_integrations() (src/integrations/registry.py).
+# Запись с существующим name заменяет базу; новое name добавляется.
+# Отсутствующие поля при override берутся из базы (частичный override).
+# Неизвестные ключи/виды/транспорты → ValueError до прогона (fail-fast).
+#
+# Запуск: uv run python -m src --integrations configs/integrations.toml --ticks 5
+
+# Оставить только официальный time-сервер (выключить прочие MCP):
+[[integrations]]
+name = "everything"
+enabled = false
+
+[[integrations]]
+name = "weather"
+enabled = false
+
+# Аргументы тулов по умолчанию (тулы, требующие вход):
+[[integrations]]
+name = "time"
+enabled = true
+tool_args = { get_current_time = { timezone = "Europe/Moscow" } }
+
+# Включить community web-search (по умолчанию выключен):
+[[integrations]]
+name = "web-search"
+kind = "tool"
+transport = "stdio"
+command = "npx"
+args = ["-y", "web-search-mcp"]
+category = "exteroceptive"
+provenance = "community"
+enabled = true

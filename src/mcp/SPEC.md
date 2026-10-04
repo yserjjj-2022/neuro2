@@ -69,9 +69,48 @@ class SignalRegistry:
         ...
 ```
 
+### Affordance / AffordanceMap / probe (probe.py, S6 проход 2)
+
+```python
+@dataclass(frozen=True)
+class Affordance:
+    name: str
+    category: SignalCategory
+    reversible: bool = True
+    dim: int = 1
+
+@dataclass(frozen=True)
+class AffordanceMap:
+    affordances: tuple[Affordance, ...] = ()
+    def find(self, name: str) -> Affordance | None: ...
+    @property
+    def names(self) -> tuple[str, ...]: ...
+    @property
+    def reversible(self) -> tuple[Affordance, ...]: ...
+
+@dataclass(frozen=True)
+class ProbeRequest:
+    affordance: str
+    reason: str
+
+@dataclass(frozen=True)
+class ProbeResult:
+    affordance: str
+    success: bool
+    data: tuple[float, ...]
+    reason: str
+
+def default_affordances() -> AffordanceMap: ...
+def select_affordance(uncertainty, affordances, *, threshold) -> Affordance | None: ...
+```
+
+Карта аффордансов — пространство того, что хост умеет (манифест §3.Ж).
+`select_affordance` — чистая: ниже порога → None, иначе первый обратимый.
+Исполнение — `src/host/probe.py::ProbeEffector` (Shell) через capability gate.
+
 ## Инварианты
 
-1. **FC/IS:** `SignalSource` — frozen dataclass,Immutable. `SignalRegistry` — единственный владелец списка источников.
+1. **FC/IS:** `SignalSource` — frozen dataclass,Immutable. `SignalRegistry` — единственный владелец списка источников. `probe.py` — чистые функции/данные; исполнение — Shell.
 2. **Severity → Reflex:** `severity ≥ 0.9` для interoceptive автоматически устанавливает `is_reflex=True`.
 3. **Reflex guard:** `is_reflex=True` для не-interoceptive сигналов → `ValueError`.
 4. **Fail-fast:** `severity ∉ [0.0, 1.0]` → `ValueError`.
