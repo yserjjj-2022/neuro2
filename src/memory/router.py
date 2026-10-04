@@ -20,7 +20,7 @@ from .errors import MemoryStoreError
 from .events import build_event_content, is_significant_event
 from .models import Episode
 from .prior import MEMORY_PRIOR_DIM, encode_memory_prior
-from .protocols import SupportsRecall, SupportsStore
+from .protocols import SupportsConsolidate, SupportsRecall, SupportsStore
 from .serialize import Vector
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class MemoryRouter:
 
     def __init__(
         self,
-        store: SupportsStore & SupportsRecall,
+        store: SupportsStore & SupportsRecall & SupportsConsolidate,
         embedder: Embedder,
         spike_threshold: float,
         recall_limit: int = 1,
@@ -106,6 +106,18 @@ class MemoryRouter:
         except ValueError as exc:
             logger.error("memory: prior encode failed (%s)", exc)
             return np.zeros(self.prior_dim, dtype=np.float64)
+
+    def episode_count(self) -> int:
+        """Число эпизодов в хранилище (для ночного цикла, S6 проход 2).
+
+        Returns:
+            Число эпизодов; 0 при сбое (память не роняет тик).
+        """
+        try:
+            return self.store.count()
+        except (MemoryStoreError, AttributeError) as exc:
+            logger.error("memory: count failed (%s)", exc)
+            return 0
 
     def maybe_store(
         self,

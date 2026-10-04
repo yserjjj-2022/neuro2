@@ -23,5 +23,13 @@ S2 (непрерывность) добавлено:
   значимых событиях (reflex / всплеск F); сбой памяти не роняет тик
 - Приор `[cos, tanh(valence), tanh(stress), tanh(f)]` (dim=4) — сегмент шины
 
-Статус: подключено к host loop (S2). Фаза 2+: консолидация во сне,
-Structure Learning (schemas), EvolvingSteeringMemory — манифест §3.Д.
+S6 (автономия) добавлено:
+- `consolidation.py`: `plan_consolidation` (Core, чистая) — pruning незначимых
+  эпизодов (вес = аффект × свежесть) + Structure Learning (жадная кластеризация
+  по косинусу → схемы); `consolidate` (Shell) — исполнить и **логировать** число
+  удалённых (инвариант 6: recall монотонен, **кроме явной консолидации**)
+- `MemoryStore.delete(ids)` / `all_episodes()` / `save_schema(...)` + таблица
+  `schemas` (centroid, member_count, summary, created_at)
+
+Статус: подключено к host loop (S2); консолидация (S6). Фаза 2+:
+EvolvingSteeringMemory — манифест §3.Д.

@@ -33,3 +33,18 @@ class SupportsRecall(Protocol):
     """
 
     def recall(self, query_embedding: Vector, limit: int = 5) -> list[Episode]: ...
+
+
+class SupportsConsolidate(Protocol):
+    """Protocol для консолидации памяти (S6).
+
+    Читает все эпизоды, удаляет незначимые, сохраняет схемы.
+    """
+
+    def all_episodes(self) -> list[Episode]: ...
+
+    def delete(self, ids: list[int]) -> int: ...
+
+    def save_schema(self, centroid: Vector, member_count: int, summary: str) -> int: ...
+
+    def count(self) -> int: ...  # S6 проход 2: ночной цикл

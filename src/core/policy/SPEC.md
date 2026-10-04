@@ -24,6 +24,7 @@ class Action(Enum):
     SILENT = "silent"
     INITIATIVE = "initiative"
     IDENTIFY_PARTNER = "identify_partner"
+    EXPLORE = "explore"  # S6: эпистемический драйв
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class Preferences:
     epistemic_weight: float = 0.5
     identify_threshold: float = 0.7      # S5: порог uncertainty для интента
     partner_trust_floor: float = 0.5     # S5: нижняя граница масштаба RESPOND
+    explore_threshold: float = 0.6       # S6: порог неопределённости для EXPLORE
 
 
 @dataclass(frozen=True)
@@ -48,8 +50,9 @@ class PolicyContext:
     task: str
     homeostasis: HomeostasisState
     has_new_message: bool
-    mode: str = "free"  # расширяемое: S6 добавит метакогницию
+    mode: str = "free"
     partner: PartnerView | None = None  # S5: ToM; None → S4-совместимость
+    metacognition: MetacognitionView | None = None  # S6; None → S5-совместимость
 
 
 @dataclass(frozen=True)
@@ -86,9 +89,13 @@ def select_action(context, preferences) -> PolicyTrace: ...
 | `SILENT` | всегда (дефолт) | `silent_baseline + silent_stress_gain·conservation(stress)` |
 | `INITIATIVE` | `f > initiative_f_threshold` ИЛИ `homeostatic_alert` и отклонение ≥ `alert_deviation` | pragmatic=1.0 |
 | `IDENTIFY_PARTNER` | `partner.uncertainty ≥ identify_threshold` (S5) | epistemic=1.0 |
+| `EXPLORE` | нет сообщения И `metacognition.epistemic_uncertainty ≥ explore_threshold` (S6) | epistemic=1.0 |
 
 `PartnerView` — структурный Protocol (S5): policy не импортирует `tm` (без
 цикла); `partner=None` → поведение S4 (RESPOND=1.0, IDENTIFY=0.0).
+`MetacognitionView` — структурный Protocol (S6): policy не импортирует
+`selfcontrol`; `metacognition=None` → поведение S5 (EXPLORE=0.0). `EXPLORE` —
+общий эпистемический драйв; `IDENTIFY_PARTNER` — его агентный частный случай.
 
 `value = pragmatic_weight·pragmatic + epistemic_weight·epistemic`. Тай-брейк —
 порядок `Action` (детерминизм). Все пороги — в `Preferences` (CONSTITUTION

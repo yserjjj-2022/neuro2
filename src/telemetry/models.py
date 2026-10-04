@@ -43,6 +43,14 @@ class TelemetryEvent:
         partner_name: Принятое имя партнёра ("" если не объявлено) — S5.
         pause_s: Интервал с прошлой реплики, с — S5.
         claim_conflict: Рассогласование последнего утверждения — S5.
+        metacog_conflict: Несогласие ансамбля колонок — S6.
+        metacog_metastability: Частота смен аттрактора в окне — S6.
+        metacog_saturation: Насыщение/тренд F — S6.
+        reset_level: Уровень сброса ("", soft/freeze/hard) — S6.
+        change_kind: Классификация изменения (""/stable/development/drift) — S6.
+        consolidated_pruned: Удалено эпизодов при консолидации — S6.
+        probe_affordance: Имя выполненного MCP-зондирования ("" если нет) — S6.
+        probe_success: Успешно ли зондирование (gate разрешил и транспорт ответил).
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
     """
@@ -74,5 +82,13 @@ class TelemetryEvent:
     partner_name: str
     pause_s: float
     claim_conflict: float
+    metacog_conflict: float
+    metacog_metastability: float
+    metacog_saturation: float
+    reset_level: str
+    change_kind: str
+    consolidated_pruned: int
+    probe_affordance: str
+    probe_success: bool
     phase: str
     mode: str

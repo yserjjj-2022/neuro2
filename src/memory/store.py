@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from pathlib import Path
 
 import sqlite_vec  # type: ignore[import-not-found]  # пакет без стабов
@@ -52,6 +53,28 @@ JOIN (SELECT rowid, distance FROM episode_vectors
       WHERE embedding MATCH ? ORDER BY distance LIMIT ?) v
     ON e.id = v.rowid
 ORDER BY v.distance
+"""
+
+_SELECT_ALL = """
+SELECT id, content, embedding, timestamp, valence, stress, free_energy
+FROM episodes
+"""
+
+_SELECT_COUNT = "SELECT COUNT(*) FROM episodes"
+
+_SCHEMA_SCHEMAS = """
+CREATE TABLE IF NOT EXISTS schemas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    centroid BLOB NOT NULL,
+    member_count INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    created_at REAL NOT NULL
+)
+"""
+
+_INSERT_SCHEMA = """
+INSERT INTO schemas (centroid, member_count, summary, created_at)
+VALUES (?, ?, ?, ?)
 """
 
 
@@ -112,6 +135,7 @@ class MemoryStore:
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.execute(_SCHEMA_EPISODES)
+            conn.execute(_SCHEMA_SCHEMAS)
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS episode_vectors "
                 f"USING vec0(embedding float[{self.embedding_dim}])"
@@ -291,3 +315,120 @@ class MemoryStore:
             )
             for row in rows
         ]
+
+    def all_episodes(self) -> list[Episode]:
+        """Все эпизоды (для консолидации, S6).
+
+        Returns:
+            Список Episode (id заполнен), в порядке вставки.
+
+        Raises:
+            MemoryStoreError: При сбое I/O.
+        """
+        if self._conn is None:
+            raise MemoryStoreError("MemoryStore is closed")
+        try:
+            rows = self._conn.execute(_SELECT_ALL).fetchall()
+        except sqlite3.Error as exc:
+            logger.error("all_episodes() failed: %s", exc)
+            raise MemoryStoreError(f"all_episodes() failed: {exc}") from exc
+        return [
+            Episode(
+                id=row[0],
+                content=row[1],
+                embedding=deserialize_embedding(row[2], self.embedding_dim),
+                timestamp=row[3],
+                valence=row[4],
+                stress=row[5],
+                free_energy=row[6],
+            )
+            for row in rows
+        ]
+
+    def count(self) -> int:
+        """Число эпизодов в памяти (для триггера ночного цикла, S6 проход 2).
+
+        Returns:
+            Число записей в ``episodes``.
+
+        Raises:
+            MemoryStoreError: При сбое I/O или закрытом store.
+        """
+        if self._conn is None:
+            raise MemoryStoreError("MemoryStore is closed")
+        try:
+            row = self._conn.execute(_SELECT_COUNT).fetchone()
+        except sqlite3.Error as exc:
+            logger.error("count() failed: %s", exc)
+            raise MemoryStoreError(f"count() failed: {exc}") from exc
+        return int(row[0]) if row is not None else 0
+
+    def delete(self, ids: list[int]) -> int:
+        """Удалить эпизоды по id (явная консолидация, S6).
+
+        Удаляет строки из ``episodes`` и соответствующие векторы из
+        ``episode_vectors`` в одной транзакции. Пустой список → 0.
+
+        Args:
+            ids: id эпизодов к удалению.
+
+        Returns:
+            Число фактически удалённых эпизодов.
+
+        Raises:
+            MemoryStoreError: При сбое I/O или закрытом store.
+        """
+        if not ids:
+            return 0
+        if self._conn is None:
+            raise MemoryStoreError("MemoryStore is closed")
+        placeholders = ",".join("?" for _ in ids)
+        try:
+            with self._conn:
+                cur = self._conn.execute(
+                    f"DELETE FROM episodes WHERE id IN ({placeholders})", ids
+                )
+                self._conn.execute(
+                    f"DELETE FROM episode_vectors WHERE rowid IN ({placeholders})",
+                    ids,
+                )
+                deleted = cur.rowcount
+        except sqlite3.Error as exc:
+            logger.error("delete() failed for %d ids: %s", len(ids), exc)
+            raise MemoryStoreError(f"delete() failed: {exc}") from exc
+        return int(deleted)
+
+    def save_schema(self, centroid: Vector, member_count: int, summary: str) -> int:
+        """Сохранить схему (Structure Learning, S6).
+
+        Args:
+            centroid: Усреднённый эмбеддинг кластера.
+            member_count: Число эпизодов в кластере.
+            summary: Текстовое резюме схемы.
+
+        Returns:
+            id записи схемы.
+
+        Raises:
+            ValueError: При несовпадении размерности центроида.
+            MemoryStoreError: При сбое I/O или закрытом store.
+        """
+        if centroid.shape[0] != self.embedding_dim:
+            raise ValueError(
+                f"centroid dim {centroid.shape[0]} != store dim {self.embedding_dim}"
+            )
+        if self._conn is None:
+            raise MemoryStoreError("MemoryStore is closed")
+        blob = serialize_embedding(centroid)
+        try:
+            with self._conn:
+                cur = self._conn.execute(
+                    _INSERT_SCHEMA, (blob, member_count, summary, time.time())
+                )
+                schema_id = cur.lastrowid
+        except sqlite3.Error as exc:
+            logger.error("save_schema() failed: %s", exc)
+            raise MemoryStoreError(f"save_schema() failed: {exc}") from exc
+        if schema_id is None:
+            raise MemoryStoreError("save_schema() returned no id")
+        return int(schema_id)

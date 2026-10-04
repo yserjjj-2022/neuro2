@@ -336,6 +336,94 @@ class SocialConfig:
 
 
 @dataclass(frozen=True)
+class AutonomyConfig:
+    """Параметры автономии (S6): самоконтроль, консолидация, драйв, факторы.
+
+    Attributes:
+        enabled: Включать ли автономию (иначе S5-совместимость).
+        metacog_window: Окно наблюдаемых/CSD, тики (>= 1).
+        csd_variance_gain: Вес дисперсионной компоненты CSD, >= 0.
+        csd_autocorr_gain: Вес автокорреляционной компоненты CSD, >= 0.
+        csd_warning_threshold: Порог slowing для warning, [0, 1].
+        reset_soft_threshold: Порог slowing для SOFT-сброса, [0, 1].
+        consolidate_min_weight: Порог веса эпизода для pruning, >= 0.
+        schema_threshold: Порог косинуса для схем, [0, 1].
+        max_schemas: Максимум схем, >= 0.
+        recency_tau_s: Постоянная свежести для веса эпизода, с (> 0).
+        explore_threshold: Порог неопределённости для EXPLORE, [0, 1].
+        factor_learning_rate: Скорость обновления факторов, (0, 1].
+        consolidate_every_ticks: Интервал ночного цикла, тики (0 → выключен).
+        consolidate_min_episodes: Минимум эпизодов для срабатывания, >= 0.
+    """
+
+    enabled: bool = False
+    metacog_window: int = 50
+    csd_variance_gain: float = 1.0
+    csd_autocorr_gain: float = 1.0
+    csd_warning_threshold: float = 0.6
+    reset_soft_threshold: float = 0.5
+    consolidate_min_weight: float = 0.1
+    schema_threshold: float = 0.8
+    max_schemas: int = 8
+    recency_tau_s: float = 86_400.0
+    explore_threshold: float = 0.6
+    factor_learning_rate: float = 0.3
+    consolidate_every_ticks: int = 0
+    consolidate_min_episodes: int = 0
+
+    def __post_init__(self) -> None:
+        """Валидация границ параметров автономии.
+
+        Raises:
+            ValueError: Если окна/пороги/скорости вне допустимых границ.
+        """
+        if self.metacog_window < 1:
+            raise ValueError(
+                f"metacog_window must be >= 1, got {self.metacog_window}"
+            )
+        if self.csd_variance_gain < 0.0 or self.csd_autocorr_gain < 0.0:
+            raise ValueError(
+                f"csd gains must be >= 0, got "
+                f"{self.csd_variance_gain}/{self.csd_autocorr_gain}"
+            )
+        for name in (
+            "csd_warning_threshold",
+            "reset_soft_threshold",
+            "schema_threshold",
+            "explore_threshold",
+        ):
+            value = getattr(self, name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1], got {value}")
+        if self.consolidate_min_weight < 0.0:
+            raise ValueError(
+                f"consolidate_min_weight must be >= 0, "
+                f"got {self.consolidate_min_weight}"
+            )
+        if self.max_schemas < 0:
+            raise ValueError(f"max_schemas must be >= 0, got {self.max_schemas}")
+        if self.recency_tau_s <= 0.0:
+            raise ValueError(
+                f"recency_tau_s must be > 0, got {self.recency_tau_s}"
+            )
+        if not 0.0 < self.factor_learning_rate <= 1.0:
+            raise ValueError(
+                f"factor_learning_rate must be in (0, 1], "
+                f"got {self.factor_learning_rate}"
+            )
+        if self.consolidate_every_ticks < 0:
+            raise ValueError(
+                f"consolidate_every_ticks must be >= 0, "
+                f"got {self.consolidate_every_ticks}"
+            )
+        if self.consolidate_min_episodes < 0:
+            raise ValueError(
+                f"consolidate_min_episodes must be >= 0, "
+                f"got {self.consolidate_min_episodes}"
+            )
+
+
+@dataclass(frozen=True)
 class HostConfig:
     """Полная конфигурация host loop.
 
@@ -365,6 +453,8 @@ class HostConfig:
         speech: Параметры речи (S3).
         homeostasis: Параметры гомеостаза (S4).
         policy: Параметры policy (S4).
+        social: Параметры социального контура (S5).
+        autonomy: Параметры автономии (S6).
     """
 
     dt: float = 0.1
@@ -398,6 +488,7 @@ class HostConfig:
     homeostasis: HomeostasisConfig = field(default_factory=HomeostasisConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
+    autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""

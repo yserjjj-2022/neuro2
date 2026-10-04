@@ -10,10 +10,12 @@ Re-exports:
     HomeostasisConfig — interoceptive setpoints + throttle (S4)
     PolicyConfig — action selection parameters (S4)
     SocialConfig — theory-of-mind parameters (S5)
+    AutonomyConfig — selfcontrol/consolidation/drive/factors parameters (S6)
 """
 
 from .params import (
     AttractorConfig,
+    AutonomyConfig,
     ColumnParams,
     EnergyConfig,
     HomeostasisConfig,
@@ -26,6 +28,7 @@ from .params import (
 
 __all__ = [
     "AttractorConfig",
+    "AutonomyConfig",
     "ColumnParams",
     "EnergyConfig",
     "HomeostasisConfig",

@@ -56,13 +56,14 @@ class TestEvaluateCandidates:
     """Tests for evaluate_candidates — scoring all actions."""
 
     def test_all_actions_present_in_order(self) -> None:
-        """Все четыре действия присутствуют в стабильном порядке."""
+        """Все действия присутствуют в стабильном порядке (S6: +EXPLORE)."""
         candidates = evaluate_candidates(_context(), Preferences())
         assert [c.action for c in candidates] == [
             Action.RESPOND,
             Action.SILENT,
             Action.INITIATIVE,
             Action.IDENTIFY_PARTNER,
+            Action.EXPLORE,
         ]
 
     def test_purity(self) -> None:
@@ -164,7 +165,7 @@ class TestSelectAction:
     def test_trace_contains_all_candidates(self) -> None:
         """Трасса содержит всех кандидатов с оценками."""
         trace = select_action(_context(has_new_message=True), Preferences())
-        assert len(trace.candidates) == 4
+        assert len(trace.candidates) == 5
         assert trace.chosen in {c.action for c in trace.candidates}
 
     def test_reason_derived_from_winner(self) -> None:

@@ -77,6 +77,7 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `homeostasis` | HomeostasisConfig() | гомеостаз + throttle (S4) |
 | `policy` | PolicyConfig() | выбор действия (S4) |
 | `social` | SocialConfig() | ToM (S5) |
+| `autonomy` | AutonomyConfig() | автономия (S6) |
 
 ### SpeechConfig (S3)
 
@@ -123,6 +124,23 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `pause_tau_s` | 5.0 | Постоянная нормировки паузы |
 | `identify_threshold` | 0.7 | Порог uncertainty для мягкого интента |
 
+### AutonomyConfig (S6)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | False | Включать автономию (иначе S5-совместимость) |
+| `metacog_window` | 50 | Окно наблюдаемых/CSD, тики |
+| `csd_variance_gain` | 1.0 | Вес дисперсионной компоненты CSD |
+| `csd_autocorr_gain` | 1.0 | Вес автокорреляционной компоненты CSD |
+| `csd_warning_threshold` | 0.6 | Порог slowing для warning |
+| `reset_soft_threshold` | 0.5 | Порог slowing для SOFT-сброса |
+| `consolidate_min_weight` | 0.1 | Порог веса эпизода для pruning |
+| `schema_threshold` | 0.8 | Порог косинуса для схем |
+| `max_schemas` | 8 | Максимум схем |
+| `recency_tau_s` | 86400.0 | Постоянная свежести эпизода, с |
+| `explore_threshold` | 0.6 | Порог неопределённости для EXPLORE |
+| `factor_learning_rate` | 0.3 | Скорость обновления факторов |
+
 ## Инварианты
 
 1. Валидация fail-fast: `k<1`, `dt<=0`,
@@ -140,6 +158,10 @@ API-настройки эмбеддера — в окружении (`.env`), н
    `SocialConfig`: `match_threshold`/`conflict_threshold`/`identify_threshold`
    ∉[0,1], `signature_learning_rate`∉(0,1], `trust_gain`/`trust_decay`<0,
    `pause_tau_s<=0` → ValueError.
+   `AutonomyConfig`: `metacog_window<1`, `csd_*_gain<0`,
+   `csd_warning_threshold`/`reset_soft_threshold`/`schema_threshold`/
+   `explore_threshold`∉[0,1], `consolidate_min_weight<0`, `max_schemas<0`,
+   `recency_tau_s<=0`, `factor_learning_rate`∉(0,1] → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 

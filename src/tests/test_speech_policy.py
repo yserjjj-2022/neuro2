@@ -121,7 +121,7 @@ class TestPolicySpeechBinding:
         trace = session.loop.last_policy_trace
         assert trace is not None
         assert trace.reason != ""
-        assert len(trace.candidates) == 4
+        assert len(trace.candidates) == 5
 
 
 class TestEscapeHatchChat:

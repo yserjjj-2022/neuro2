@@ -6,6 +6,7 @@ import pytest
 
 from src.config import (
     AttractorConfig,
+    AutonomyConfig,
     ColumnParams,
     EnergyConfig,
     HomeostasisConfig,
@@ -223,3 +224,42 @@ class TestSocialConfig:
 
     def test_host_config_has_social(self) -> None:
         assert HostConfig().social.enabled is False
+
+
+class TestAutonomyConfig:
+    """AutonomyConfig: дефолты и валидация (S6)."""
+
+    def test_defaults(self) -> None:
+        cfg = AutonomyConfig()
+        assert cfg.enabled is False
+        assert cfg.metacog_window == 50
+        assert cfg.explore_threshold == 0.6
+
+    def test_bad_window_raises(self) -> None:
+        with pytest.raises(ValueError):
+            AutonomyConfig(metacog_window=0)
+
+    def test_threshold_out_of_range_raises(self) -> None:
+        with pytest.raises(ValueError):
+            AutonomyConfig(csd_warning_threshold=1.5)
+        with pytest.raises(ValueError):
+            AutonomyConfig(schema_threshold=-0.1)
+
+    def test_bad_gains_raise(self) -> None:
+        with pytest.raises(ValueError):
+            AutonomyConfig(csd_variance_gain=-1.0)
+
+    def test_bad_learning_rate_raises(self) -> None:
+        with pytest.raises(ValueError):
+            AutonomyConfig(factor_learning_rate=0.0)
+        with pytest.raises(ValueError):
+            AutonomyConfig(factor_learning_rate=1.5)
+
+    def test_bad_tau_and_schemas_raise(self) -> None:
+        with pytest.raises(ValueError):
+            AutonomyConfig(recency_tau_s=0.0)
+        with pytest.raises(ValueError):
+            AutonomyConfig(max_schemas=-1)
+
+    def test_host_config_has_autonomy(self) -> None:
+        assert HostConfig().autonomy.enabled is False

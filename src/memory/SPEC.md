@@ -7,6 +7,11 @@
 S2 (`stages/S2_SPEC.md`) добавляет: эмбеддер (текст → вектор), детектор
 значимых событий, приор памяти и `MemoryRouter` (recall → приор, запись).
 
+S6 (`stages/S6_SPEC.md`) добавляет **консолидацию** (`consolidation.py`):
+active pruning незначимых эпизодов + Structure Learning (схемы). Удаление
+явное и логируемое — инвариант 6 («recall монотонен **кроме явной
+консолидации**»). `MemoryStore.delete` / `all_episodes` / `save_schema`.
+
 См. также:
 - `FreeEnergyResult` из `src/core/energy/` — пример frozen dataclass для доменного объекта
 - `TelemetryEvent` из `src/telemetry/` — пример frozen dataclass с плоской структурой
@@ -361,7 +366,49 @@ class SupportsRecall(Protocol):
     def recall(
         self, query_embedding: np.ndarray, limit: int = ...
     ) -> list[Episode]: ...
+
+
+class SupportsConsolidate(Protocol):  # S6
+    def all_episodes(self) -> list[Episode]: ...
+    def delete(self, ids: list[int]) -> int: ...
+    def save_schema(
+        self, centroid: np.ndarray, member_count: int, summary: str
+    ) -> int: ...
 ```
+
+## Консолидация (S6)
+
+```python
+@dataclass(frozen=True)
+class Schema:
+    centroid: Vector
+    member_count: int
+    summary: str
+
+@dataclass(frozen=True)
+class ConsolidationPlan:
+    prune_ids: tuple[int, ...]
+    schemas: tuple[Schema, ...]
+    kept: int
+    reason: str
+
+@dataclass(frozen=True)
+class ConsolidationResult:
+    pruned: int
+    schemas_saved: int
+    reason: str
+
+def episode_weight(episode, *, now, recency_tau_s) -> float: ...
+def plan_consolidation(episodes, *, min_weight, schema_threshold,
+                       max_schemas, now, recency_tau_s=86400.0) -> ConsolidationPlan: ...
+def consolidate(store, *, min_weight, schema_threshold, max_schemas,
+                now, recency_tau_s=86400.0) -> ConsolidationResult: ...
+```
+
+`plan_consolidation` (Core, чистая): pruning по весу (`episode_weight` =
+аффект × свежесть), Structure Learning — жадная кластеризация сохранённых по
+косинусу. `consolidate` (Shell): исполнить план, логировать число удалённых.
+Таблица `schemas` (centroid, member_count, summary, created_at).
 
 ## Инварианты
 
@@ -421,10 +468,11 @@ class SupportsRecall(Protocol):
 
 ## Явно НЕ входит в скоуп (Phase 1)
 
-- **Ночной сон**: нет active pruning, нет consolidation — Фаза 4
-- **Structure Learning**: нет обобщения паттернов в схемы — Фаза 4
+- ~~**Ночной сон**~~ → S6: консолидация вызывается явно (`consolidate`).
+- ~~**Structure Learning**~~ → S6: схемы (`plan_consolidation`).
 - **EvolvingSteeringMemory**: нет накопления вектора характера — Фаза 2+
-- **Удаление эпизодов**: нет delete(), нет TTL — Фаза 4
+- ~~**Удаление эпизодов**~~ → S6: `delete()` (только явная консолидация).
+- **Расписание ночного сна** — S6 проход 2 (в проходе 1 — явный вызов).
 - **Ротация/сжатие БД**: нет VACUUM, нет архивации — Фаза 4+
 - **Конкурентный доступ**: явно исключён — однопользовательский однопроцессный хост
 - **Многомерный поиск**: нет фильтрации по времени/валентности — только по схожести

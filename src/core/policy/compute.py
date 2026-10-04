@@ -25,6 +25,7 @@ _ACTION_ORDER: tuple[Action, ...] = (
     Action.SILENT,
     Action.INITIATIVE,
     Action.IDENTIFY_PARTNER,
+    Action.EXPLORE,
 )
 
 
@@ -93,6 +94,27 @@ def _evaluate_identify(
     return 0.0, 0.0, "partner identified"
 
 
+def _evaluate_explore(
+    context: PolicyContext, preferences: Preferences
+) -> tuple[float, float, str]:
+    """Оценка EXPLORE: эпистемический драйв по неопределённости (S6).
+
+    Драйв мягкий: исследует неопределённость только когда нет сообщения
+    (сначала ответить/промолчать) и метакогнитивная неопределённость выше
+    порога. ``IDENTIFY_PARTNER`` — частный случай (агентная неопределённость);
+    ``EXPLORE`` — общий (конфликт/метастабильность/насыщение). ``None`` →
+    S5-совместимость (0.0).
+    """
+    if context.metacognition is None:
+        return 0.0, 0.0, "no metacognition (S5)"
+    if context.has_new_message:
+        return 0.0, 0.0, "message present, explore deferred"
+    uncertainty = context.metacognition.epistemic_uncertainty
+    if uncertainty < preferences.explore_threshold:
+        return 0.0, 0.0, "uncertainty below explore threshold"
+    return 0.0, 1.0, "epistemic uncertainty above threshold"
+
+
 def evaluate_candidates(
     context: PolicyContext,
     preferences: Preferences,
@@ -114,6 +136,7 @@ def evaluate_candidates(
         Action.SILENT: _evaluate_silent,
         Action.INITIATIVE: _evaluate_initiative,
         Action.IDENTIFY_PARTNER: _evaluate_identify,
+        Action.EXPLORE: _evaluate_explore,
     }
     candidates: list[PolicyCandidate] = []
     for action in _ACTION_ORDER:

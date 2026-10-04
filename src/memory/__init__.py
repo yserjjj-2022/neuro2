@@ -14,6 +14,16 @@ Re-exports:
     MemoryRouter — shell orchestrating recall→prior and episode storage
 """
 
+from .consolidation import (
+    ConsolidationPlan,
+    ConsolidationResult,
+    ConsolidationTrigger,
+    Schema,
+    consolidate,
+    episode_weight,
+    plan_consolidation,
+    should_consolidate,
+)
 from .embedder import (
     DEFAULT_API_DIM,
     DEFAULT_API_MODEL,
@@ -34,7 +44,7 @@ from .events import build_event_content, is_significant_event
 from .hash import content_hash
 from .models import Episode
 from .prior import MEMORY_PRIOR_DIM, encode_memory_prior
-from .protocols import SupportsRecall, SupportsStore
+from .protocols import SupportsConsolidate, SupportsRecall, SupportsStore
 from .router import MemoryRouter
 from .serialize import deserialize_embedding, serialize_embedding
 from .similarity import cosine_similarity
@@ -50,6 +60,9 @@ __all__ = [
     "ENV_MODEL",
     "MEMORY_PRIOR_DIM",
     "ApiEmbedder",
+    "ConsolidationPlan",
+    "ConsolidationResult",
+    "ConsolidationTrigger",
     "Embedder",
     "EmbedderError",
     "Episode",
@@ -57,15 +70,21 @@ __all__ = [
     "MemoryRouter",
     "MemoryStore",
     "MemoryStoreError",
+    "Schema",
+    "SupportsConsolidate",
     "SupportsRecall",
     "SupportsStore",
     "build_embedder",
     "build_event_content",
+    "consolidate",
     "content_hash",
     "cosine_similarity",
     "deserialize_embedding",
     "embedder_settings_from_env",
     "encode_memory_prior",
+    "episode_weight",
     "is_significant_event",
+    "plan_consolidation",
     "serialize_embedding",
+    "should_consolidate",
 ]

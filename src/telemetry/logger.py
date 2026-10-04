@@ -86,6 +86,14 @@ class TelemetryLogger:
         partner_name: str = "",
         pause_s: float = 0.0,
         claim_conflict: float = 0.0,
+        metacog_conflict: float = 0.0,
+        metacog_metastability: float = 0.0,
+        metacog_saturation: float = 0.0,
+        reset_level: str = "",
+        change_kind: str = "",
+        consolidated_pruned: int = 0,
+        probe_affordance: str = "",
+        probe_success: bool = False,
     ) -> None:
         """Записать событие в лог.
 
@@ -119,6 +127,14 @@ class TelemetryLogger:
             partner_name: Принятое имя партнёра (S5).
             pause_s: Интервал с прошлой реплики, с (S5).
             claim_conflict: Рассогласование последнего утверждения (S5).
+            metacog_conflict: Несогласие ансамбля колонок (S6).
+            metacog_metastability: Частота смен аттрактора в окне (S6).
+            metacog_saturation: Насыщение/тренд F (S6).
+            reset_level: Уровень сброса: "", soft/freeze/hard (S6).
+            change_kind: Классификация: ""/stable/development/drift (S6).
+            consolidated_pruned: Удалено эпизодов при консолидации (S6).
+            probe_affordance: Выполненное MCP-зондирование ("" если нет) (S6).
+            probe_success: Успешно ли зондирование (S6).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -148,6 +164,14 @@ class TelemetryLogger:
             partner_name=partner_name,
             pause_s=pause_s,
             claim_conflict=claim_conflict,
+            metacog_conflict=metacog_conflict,
+            metacog_metastability=metacog_metastability,
+            metacog_saturation=metacog_saturation,
+            reset_level=reset_level,
+            change_kind=change_kind,
+            consolidated_pruned=consolidated_pruned,
+            probe_affordance=probe_affordance,
+            probe_success=probe_success,
             phase=self.phase,
             mode=self.mode,
         )

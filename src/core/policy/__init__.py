@@ -14,6 +14,7 @@ from src.core.policy.compute import evaluate_candidates, select_action
 from src.core.policy.models import (
     Action,
     MacroContext,
+    MetacognitionView,
     PartnerView,
     PolicyCandidate,
     PolicyContext,
@@ -24,6 +25,7 @@ from src.core.policy.models import (
 __all__ = [
     "Action",
     "MacroContext",
+    "MetacognitionView",
     "PartnerView",
     "PolicyCandidate",
     "PolicyContext",

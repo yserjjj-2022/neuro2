@@ -40,6 +40,28 @@ class PartnerView(Protocol):
     def name(self) -> str: ...
 
 
+@runtime_checkable
+class MetacognitionView(Protocol):
+    """Структурный вид метакогнитивных наблюдаемых для policy (S6).
+
+    Policy не импортирует ``core.selfcontrol`` напрямую (без цикла): достаточно
+    read-only атрибутов. ``selfcontrol.Metacognition`` структурно удовлетворяет
+    контракту. ``None`` → S5-совместимость (эпистемический драйв выключен).
+    """
+
+    @property
+    def conflict(self) -> float: ...
+
+    @property
+    def metastability(self) -> float: ...
+
+    @property
+    def epistemic_uncertainty(self) -> float: ...
+
+    @property
+    def saturation(self) -> float: ...
+
+
 class Action(Enum):
     """Кандидаты-действия policy.
 
@@ -51,6 +73,7 @@ class Action(Enum):
     SILENT = "silent"
     INITIATIVE = "initiative"
     IDENTIFY_PARTNER = "identify_partner"
+    EXPLORE = "explore"  # S6: эпистемический драйв (исследование неопределённости)
 
 
 @dataclass(frozen=True)
@@ -78,6 +101,7 @@ class Preferences:
     epistemic_weight: float = 0.5
     identify_threshold: float = 0.7  # S5: порог uncertainty для мягкого интента
     partner_trust_floor: float = 0.5  # S5: нижняя граница масштаба RESPOND
+    explore_threshold: float = 0.6  # S6: порог неопределённости для EXPLORE
 
     def __post_init__(self) -> None:
         """Валидация: неотрицательные пороги и веса.
@@ -121,6 +145,10 @@ class Preferences:
                 f"partner_trust_floor must be in [0, 1], "
                 f"got {self.partner_trust_floor}"
             )
+        if not 0.0 <= self.explore_threshold <= 1.0:
+            raise ValueError(
+                f"explore_threshold must be in [0, 1], got {self.explore_threshold}"
+            )
 
 
 @dataclass(frozen=True)
@@ -148,6 +176,7 @@ class PolicyContext:
     has_new_message: bool
     mode: str = "free"
     partner: PartnerView | None = None  # S5: ToM; None → S4-совместимость
+    metacognition: MetacognitionView | None = None  # S6; None → S5-совместимость
 
 
 @dataclass(frozen=True)

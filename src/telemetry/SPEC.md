@@ -13,10 +13,13 @@ S4: +4 поля (throttle/homeostasis/policy_action/policy_reason) = 23.
 S4-долг: +`escape_hatch` (право сообщить о перегрузке) = 24.
 S5: +5 социальных полей (partner_trust/uncertainty/name, pause_s,
 claim_conflict) = 29.
+S6: +6 полей автономии (metacog_conflict/metastability/saturation, reset_level,
+change_kind, consolidated_pruned) = 35.
+S6 (проход 2): +2 поля MCP-зондирования (probe_affordance, probe_success) = 37.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 29 полей)
+### TelemetryEvent (frozen dataclass, 37 полей)
 
 ```python
 @dataclass(frozen=True)
@@ -48,6 +51,14 @@ class TelemetryEvent:
     partner_name: str  # принятое имя партнёра, "" если нет (S5)
     pause_s: float  # интервал с прошлой реплики, с (S5)
     claim_conflict: float  # рассогласование последнего утверждения (S5)
+    metacog_conflict: float  # несогласие ансамбля колонок (S6)
+    metacog_metastability: float  # частота смен аттрактора (S6)
+    metacog_saturation: float  # насыщение/тренд F (S6)
+    reset_level: str  # уровень сброса: ""/soft/freeze/hard (S6)
+    change_kind: str  # классификация: ""/stable/development/drift (S6)
+    consolidated_pruned: int  # удалено эпизодов при консолидации (S6)
+    probe_affordance: str  # имя выполненного MCP-зондирования, "" если нет (S6)
+    probe_success: bool  # успешно ли зондирование (S6)
     phase: str
     mode: str
 ```
@@ -104,6 +115,12 @@ def log(
     partner_name="",
     pause_s=0.0,
     claim_conflict=0.0,
+    metacog_conflict=0.0,
+    metacog_metastability=0.0,
+    metacog_saturation=0.0,
+    reset_level="",
+    change_kind="",
+    consolidated_pruned=0,
 ) -> None: ...
 ```
 
@@ -117,9 +134,9 @@ def log(
 4. **Flush после записи** (crash-safety).
 5. **DI через Protocol** `SupportsWrite`.
 
-## Критерии приёмки (S1–S5)
+## Критерии приёмки (S1–S6)
 
-- [x] `TelemetryEvent` — 29 полей, все типизированы
+- [x] `TelemetryEvent` — 35 полей, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)
