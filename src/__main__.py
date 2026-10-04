@@ -13,7 +13,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.config import HostConfig, MemoryConfig, PolicyConfig, SpeechConfig
+from src.config import (
+    HostConfig,
+    MemoryConfig,
+    PolicyConfig,
+    SocialConfig,
+    SpeechConfig,
+)
 from src.host.loop import HostLoop, build_host_loop
 from src.speech import (
     ChatSession,
@@ -22,6 +28,7 @@ from src.speech import (
     build_llm_client,
     llm_settings_from_env,
 )
+from src.tm import JointAgency, PartnerModel, VigilanceGate
 
 logger = logging.getLogger(__name__)
 
@@ -158,15 +165,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="free",
         help="Режим хоста (макро-контекст policy): game/cooperative/free.",
     )
+    parser.add_argument(
+        "--no-social",
+        action="store_true",
+        help="Отключить ToM (S5): контур S4 без модели партнёра.",
+    )
     return parser.parse_args(argv)
 
 
-def _run_chat(loop: HostLoop, args: argparse.Namespace) -> int:
-    """Запустить диалоговый стенд (S3).
+def _run_chat(
+    loop: HostLoop, args: argparse.Namespace, social: SocialConfig
+) -> int:
+    """Запустить диалоговый стенд (S3/S5).
 
     Args:
         loop: Собранный host loop (с включённой памятью и речью).
         args: Аргументы CLI (llm, model, register, f_threshold).
+        social: Параметры социального контура (S5).
 
     Returns:
         Код выхода (0 — успех).
@@ -188,12 +203,33 @@ def _run_chat(loop: HostLoop, args: argparse.Namespace) -> int:
     )
     history = ConversationHistory(max_turns=args.history_turns)
     policy = None if args.no_policy else loop.policy_config
+    partner_model = None
+    vigilance = None
+    joint_agency = None
+    if social.enabled and loop.memory is not None:
+        embedder = loop.memory.embedder
+        partner_model = PartnerModel(
+            embedder=embedder,
+            match_threshold=social.match_threshold,
+            learning_rate=social.signature_learning_rate,
+            trust_gain=social.trust_gain,
+            trust_decay=social.trust_decay,
+        )
+        vigilance = VigilanceGate(
+            embedder=embedder, conflict_threshold=social.conflict_threshold
+        )
+        if args.mode == "cooperative":
+            joint_agency = JointAgency()
     session = ChatSession(
         loop=loop,
         controller=controller,
         history=history,
         show_status=args.status,
         policy=policy,
+        partner_model=partner_model,
+        pause_tau_s=social.pause_tau_s,
+        vigilance=vigilance,
+        joint_agency=joint_agency,
     )
     logger.info(
         "Chat session started (llm=%s, model=%s). /quit to exit.", args.llm, model
@@ -221,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parse_args(argv)
+    social = SocialConfig(enabled=not args.no_social)
 
     loop: HostLoop = build_host_loop(
         HostConfig(
@@ -245,11 +282,12 @@ def main(argv: list[str] | None = None) -> int:
                 history_turns=args.history_turns,
             ),
             policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
+            social=social,
         )
     )
 
     if args.chat:
-        return _run_chat(loop, args)
+        return _run_chat(loop, args, social)
 
     stopping = {"flag": False}
 

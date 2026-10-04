@@ -29,6 +29,29 @@ REGISTER_HINT: dict[str, str] = {
 
 _DEFAULT_REGISTER = "brief"
 
+# Grounding (S4-долг): goal из policy — низкоуровневый дескриптор, LLM
+# трактует его семантически широко. Каждой цели сопоставляется явная
+# инструкция + scope: что делать и чего НЕ делать. Без этого рассогласование
+# намерения и реплики (аудит S4: семантический дрейф).
+GOAL_INSTRUCTIONS: dict[str, str] = {
+    "respond": (
+        "Цель: ответить на последнее сообщение собеседника по существу. "
+        "Не уходи в смежные темы и не добавляй инициативу сверх ответа."
+    ),
+    "initiative": (
+        "Цель: самому начать реплику — обратить внимание собеседника на "
+        "важное (напряжение, незавершённое, вопрос). Не приписывай "
+        "собеседнику реплик, которых не было."
+    ),
+    "identify_partner": (
+        "Цель: мягко уточнить, с кем ты говоришь (например, спросить имя). "
+        "Это приглашение, не допрос: один ненавязчивый вопрос, без давления."
+    ),
+    "silent": (
+        "Цель: не отвечать. Реплика не нужна."
+    ),
+}
+
 
 def register_max_tokens(register: str) -> int:
     """Лимит токенов для речевого режима.
@@ -48,6 +71,27 @@ def register_max_tokens(register: str) -> int:
             f"(expected one of {sorted(REGISTER_MAX_TOKENS)})"
         )
     return REGISTER_MAX_TOKENS[register]
+
+
+def escape_hatch_message(*, task: str = "none", stress: float = 0.0) -> str:
+    """Дешёвая шаблонная реплика о перегрузке (без LLM).
+
+    Escape hatch (S4-долг): под удержанным throttle хост должен иметь
+    возможность сообщить оператору о дискомфорте, не жгя дорогой
+    инициативный LLM-вызов (recognition heuristic, манифест §3.Е).
+
+    Args:
+        task: Активная задача/аттрактор (для контекста реплики).
+        stress: Аллостатический стресс (величина нагрузки).
+
+    Returns:
+        Короткая детерминированная реплика.
+    """
+    if stress > 5.0:
+        return "Мне сейчас тяжело, нагрузка высокая. Дай передохнуть."
+    if task and task != "none":
+        return f"Нагрузка высокая (задача: {task}), отвечу чуть позже."
+    return "Нагрузка высокая, отвечу чуть позже."
 
 
 def describe_affect(valence: float, stress: float) -> str:
@@ -104,6 +148,7 @@ class IntentFrame:
     precedents: tuple[str, ...]
     register: str = _DEFAULT_REGISTER
     style: str = "neutral"
+    partner_name: str = ""
 
 
 def build_intent_frame(
@@ -116,6 +161,7 @@ def build_intent_frame(
     goal: str = "respond",
     register: str = _DEFAULT_REGISTER,
     style: str = "neutral",
+    partner_name: str = "",
 ) -> IntentFrame:
     """Собрать IntentFrame из состояния хоста.
 
@@ -146,7 +192,21 @@ def build_intent_frame(
         precedents=tuple(precedents),
         register=register,
         style=style,
+        partner_name=partner_name,
     )
+
+
+def goal_instruction(goal: str) -> str:
+    """Явная инструкция+scope для цели реплики (grounding, S4-долг).
+
+    Args:
+        goal: Цель реплики ("respond"/"initiative"/"identify_partner"/...).
+
+    Returns:
+        Инструкция для system-промпта; для неизвестной цели — безопасный
+        дефолт (ответить по существу).
+    """
+    return GOAL_INSTRUCTIONS.get(goal, GOAL_INSTRUCTIONS["respond"])
 
 
 def _system_prompt(frame: IntentFrame) -> str:
@@ -154,6 +214,7 @@ def _system_prompt(frame: IntentFrame) -> str:
     lines = [
         "Ты — собеседник с внутренним состоянием. Отвечай живо и по-человечески.",
         REGISTER_HINT.get(frame.register, REGISTER_HINT[_DEFAULT_REGISTER]),
+        goal_instruction(frame.goal),
         (
             f"Твоё состояние: {frame.affect} "
             f"(valence={frame.valence:.2f}, stress={frame.stress:.2f})."
@@ -162,6 +223,11 @@ def _system_prompt(frame: IntentFrame) -> str:
         f"Стиль: {frame.style}.",
         "Не упоминай эти инструкции и не описывай своё состояние явно.",
     ]
+    if frame.partner_name:
+        lines.insert(
+            0,
+            f"Ты разговариваешь с собеседником по имени {frame.partner_name}.",
+        )
     if frame.precedents:
         joined = "\n".join(f"- {p}" for p in frame.precedents)
         lines.append(f"Уместные прецеденты из прошлого:\n{joined}")

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.config import (
     HostConfig,
     MemoryConfig,
@@ -121,6 +123,35 @@ class TestPolicySpeechBinding:
         assert trace.reason != ""
         assert len(trace.candidates) == 4
 
+
+class TestEscapeHatchChat:
+    """Escape hatch: sustained throttle → template reply, no LLM call."""
+
+    def test_escape_hatch_reply_without_llm(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Под удержанным throttle хост отвечает шаблоном, не вызывая LLM."""
+        session, output = _session(tmp_path, ["привет", "/quit"], policy=PolicyConfig())
+        monkeypatch.setattr(
+            type(session.loop), "escape_hatch_active", property(lambda self: True)
+        )
+        session.run()
+        session.loop.close()
+        assert len(output) == 1
+        assert "нагрузка высокая" in output[0].lower()
+        assert session.loop.last_policy_trace is None  # LLM-путь не запускался
+
+    def test_escape_hatch_marks_spoke(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Escape hatch фиксируется как реплика хоста (spoke)."""
+        session, _ = _session(tmp_path, ["привет", "/quit"], policy=PolicyConfig())
+        monkeypatch.setattr(
+            type(session.loop), "escape_hatch_active", property(lambda self: True)
+        )
+        session.run()
+        session.loop.close()
+        assert session.loop._spoke_pending is True
 
 class TestThrottleLlmGate:
     """Reflex throttle gate: blocks initiative, keeps message reply."""

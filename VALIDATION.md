@@ -155,12 +155,42 @@ reflex в логе; ресурсный сигнал присутствует.
 (`cmc/attention.py`), capability gate (заготовка + аудит речи), control
 channel (status/pause/resume/step), макро-контекст `MacroContext`.
 
+**Долги аудита S4 закрыты (2026-10-04):**
+- [x] escape hatch под throttle: streak удержания → право голоса шаблоном
+      без LLM; телеметрия `escape_hatch` (24-е поле); сброс при норме
+- [x] гранулярные права gate: `Capability`-флаги поверх tier-лестницы;
+      под throttle `SPEAK` сохранён, `THINK` отозван
+- [x] grounding IntentFrame → промпт: `goal → инструкция + scope`
+      (`GOAL_INSTRUCTIONS`); неизвестная цель → безопасный дефолт
+
+**Осознанный долг (не блокер):** полный обход attractor/dwell рефлексом —
+не реализуем в S4/S5 (BACKLOG `[S4][reflex]`, P2); расхождение SPEC/код снято.
+
 ### S5 — Социальность
 
-**Критерии go:**
-- [ ] C9: противоречивое утверждение маркируется как гипотеза
-- [ ] модель партнёра обновляется по ходу диалога
-- [ ] Joint Agency: совместная цель, а не только исполнение
+SPEC/PLAN: `stages/S5_SPEC.md`, `stages/S5_PLAN.md`; модуль — `src/tm/`.
+
+**Проход 1 закрыт (2026-10-04):**
+- [x] сигнатура партнёра копится по ходу диалога (`PartnerModel.observe`)
+- [x] узнавание: повторная реплика матчится к той же сигнатуре
+- [x] ToM → policy: `PolicyContext.partner`; высокая `uncertainty` →
+      мягкий интент `IDENTIFY_PARTNER`; `trust` масштабирует `RESPOND`
+- [x] тайминг диалога: нормированная пауза (`normalize_pause`) в `ChatSession`
+- [x] `partner_model=None` / `social.enabled=False` → контур S4 идентичен
+- [x] `--no-social` в CLI; `SocialConfig` с валидацией
+
+**Проход 2 закрыт (2026-10-04):**
+- [x] C9: противоречивое утверждение маркируется как гипотеза
+      (`VigilanceGate`, конфликт-детект без LLM; ответ не блокируется)
+- [x] имена/алиасы: `/name` привязывает объявленное имя к сигнатуре;
+      вокатив в system-промпте (`IntentFrame.partner_name`)
+- [x] Joint Agency: `JointAgency` — совместная цель + напоминание при уходе
+      (подстраховка, не исполнение приказа)
+- [x] телеметрия ToM: +5 полей (partner_trust/uncertainty/name, pause_s,
+      claim_conflict) → 29 полей
+
+**Осознанно отложено:** персистентность сигнатур в общий store (сейчас
+in-memory в сессии); мультиагентный вход; полная sparse-факторизация — S6.
 
 ### S6 — Автономия
 

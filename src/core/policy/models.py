@@ -10,8 +10,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol, runtime_checkable
 
 from src.core.homeostasis import HomeostasisState
+
+
+@runtime_checkable
+class PartnerView(Protocol):
+    """Структурный вид состояния партнёра для policy (S5).
+
+    Policy не импортирует слой ``tm`` напрямую (без цикла зависимостей):
+    достаточно, чтобы объект предоставлял эти read-only атрибуты.
+    ``tm.PartnerState`` (frozen dataclass) структурно удовлетворяет контракту.
+    """
+
+    @property
+    def trust(self) -> float: ...
+
+    @property
+    def ambiguity(self) -> float: ...
+
+    @property
+    def conflict(self) -> float: ...
+
+    @property
+    def uncertainty(self) -> float: ...
+
+    @property
+    def name(self) -> str: ...
 
 
 class Action(Enum):
@@ -50,6 +76,8 @@ class Preferences:
     silent_stress_gain: float = 0.3
     pragmatic_weight: float = 1.0
     epistemic_weight: float = 0.5
+    identify_threshold: float = 0.7  # S5: порог uncertainty для мягкого интента
+    partner_trust_floor: float = 0.5  # S5: нижняя граница масштаба RESPOND
 
     def __post_init__(self) -> None:
         """Валидация: неотрицательные пороги и веса.
@@ -84,6 +112,15 @@ class Preferences:
             raise ValueError(
                 f"epistemic_weight must be >= 0, got {self.epistemic_weight}"
             )
+        if not 0.0 <= self.identify_threshold <= 1.0:
+            raise ValueError(
+                f"identify_threshold must be in [0, 1], got {self.identify_threshold}"
+            )
+        if not 0.0 <= self.partner_trust_floor <= 1.0:
+            raise ValueError(
+                f"partner_trust_floor must be in [0, 1], "
+                f"got {self.partner_trust_floor}"
+            )
 
 
 @dataclass(frozen=True)
@@ -110,6 +147,7 @@ class PolicyContext:
     homeostasis: HomeostasisState
     has_new_message: bool
     mode: str = "free"
+    partner: PartnerView | None = None  # S5: ToM; None → S4-совместимость
 
 
 @dataclass(frozen=True)

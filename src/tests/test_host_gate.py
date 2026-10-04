@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from src.host.gate import (
     ActionRequest,
+    Capability,
     CapabilityGate,
     CapabilityTier,
     GateDecision,
@@ -113,3 +114,108 @@ class TestCapabilityGate:
             pass
         else:  # pragma: no cover
             raise AssertionError("GateDecision should be frozen")
+
+
+class TestGranularCapabilities:
+    """S4-долг: гранулярные права поверх tier-лестницы."""
+
+    def test_all_capabilities_granted_by_default(self) -> None:
+        """Без явного granted разрешены все права."""
+        gate = CapabilityGate()
+        assert gate.granted == frozenset(Capability)
+
+    def test_action_without_capabilities_allowed(self) -> None:
+        """Действие без требуемых прав не зависит от granted (совместимость)."""
+        gate = CapabilityGate(granted=frozenset())
+        decision = gate.request(
+            ActionRequest(
+                name="speak",
+                tier=CapabilityTier.T1,
+                reversible=True,
+                reason="respond",
+            )
+        )
+        assert decision.allowed is True
+
+    def test_deny_when_capability_not_granted(self) -> None:
+        """Требуемое право отсутствует в granted → отказ (fail-safe deny)."""
+        gate = CapabilityGate(granted=frozenset({Capability.READ}))
+        decision = gate.request(
+            ActionRequest(
+                name="think",
+                tier=CapabilityTier.T1,
+                reversible=True,
+                reason="initiative",
+                capabilities=frozenset({Capability.THINK}),
+            )
+        )
+        assert decision.allowed is False
+        assert "missing capabilities" in decision.reason
+        assert "think" in decision.reason
+
+    def test_allow_when_capability_granted(self) -> None:
+        """Требуемое право выдано → разрешено."""
+        gate = CapabilityGate(granted=frozenset({Capability.SPEAK}))
+        decision = gate.request(
+            ActionRequest(
+                name="speak",
+                tier=CapabilityTier.T1,
+                reversible=True,
+                reason="respond",
+                capabilities=frozenset({Capability.SPEAK}),
+            )
+        )
+        assert decision.allowed is True
+
+    def test_escape_hatch_speak_without_think(self) -> None:
+        """Под throttle: SPEAK выдан, THINK отозван → голос возможен, LLM нет.
+
+        Это и есть escape hatch: хост сообщает о перегрузке шаблоном,
+        не имея права на дорогой инициативный вызов.
+        """
+        gate = CapabilityGate(granted=frozenset({Capability.READ, Capability.SPEAK}))
+        speak = gate.request(
+            ActionRequest(
+                name="speak",
+                tier=CapabilityTier.T1,
+                reversible=True,
+                reason="escape hatch",
+                capabilities=frozenset({Capability.SPEAK}),
+            )
+        )
+        think = gate.request(
+            ActionRequest(
+                name="initiative",
+                tier=CapabilityTier.T1,
+                reversible=True,
+                reason="initiative",
+                capabilities=frozenset({Capability.THINK}),
+            )
+        )
+        assert speak.allowed is True
+        assert think.allowed is False
+
+    def test_revoke_and_grant(self) -> None:
+        """revoke/grant меняют набор прав."""
+        gate = CapabilityGate(granted=frozenset({Capability.SPEAK}))
+        gate.revoke(Capability.SPEAK)
+        assert Capability.SPEAK not in gate.granted
+        gate.grant(Capability.SPEAK)
+        assert Capability.SPEAK in gate.granted
+
+    def test_capability_checked_before_tier(self) -> None:
+        """Права проверяются раньше tier: отказ с причиной о правах."""
+        gate = CapabilityGate(
+            max_tier=CapabilityTier.T0, granted=frozenset({Capability.READ})
+        )
+        decision = gate.request(
+            ActionRequest(
+                name="speak",
+                tier=CapabilityTier.T4,
+                reversible=True,
+                reason="x",
+                capabilities=frozenset({Capability.SPEAK}),
+            )
+        )
+        assert decision.allowed is False
+        assert "missing capabilities" in decision.reason

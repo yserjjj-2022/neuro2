@@ -10,7 +10,8 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 - `wiring.py` — чистая композиция `CMCPipeline` → `TickOutcome` (без I/O).
 - `resources.py` — `ResourceMeter` + `ResourceProvider` (интероцепция ресурсов).
 - `throttle.py` — `ThrottlePlan` + `plan_throttle` (рефлекс-throttle, S4).
-- `gate.py` — `CapabilityGate` + tiers (единая точка side-effect, S4 заготовка).
+- `gate.py` — `CapabilityGate` + tiers + `Capability`-флаги (единая точка
+  side-effect, S4; гранулярные права — S4-долг).
 - `control.py` — `ControlChannel` (status/pause/resume/step, S4).
 - `loop.py` — `HostLoop`: время, precision, гомеостаз, throttle, attention,
   ресурсы, guard, drift, policy-контекст, телеметрия.
@@ -26,6 +27,7 @@ u_base  = SignalBus.step(tick, now)
 homeo   = homeostat.evaluate(bus.last_signals)     # S4
 throttle= plan_throttle(homeo)                     # S4
 if throttle.active: dt *= dt_scale; voting.set_k(...)  # S4
+# escape hatch: streak удержания throttle → право голоса шаблоном (S4-долг)
 text    = message_provider.text_at(tick)           # S2
 if text != last_text:
     query = memory.context_embedding(text)         # S2 (event-triggered)
@@ -37,7 +39,8 @@ outcome = pipeline.tick(u_eff, γ, dt, segments, reflex_tags)
 check_finite(outcome.result)            # HostIntegrityError при NaN/inf
 drift   = DriftDetector.update(outcome.result)
 stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
-telemetry.log(..., throttle, homeostasis, policy_action, policy_reason)
+telemetry.log(..., throttle, homeostasis, policy_action, policy_reason,
+              escape_hatch)
 ```
 
 **Рефлекс ≤ 1 тик** (S4): `homeostat.evaluate` читает сигналы текущего тика
@@ -54,6 +57,13 @@ Throttle обратим: базовое `k` восстанавливается �
 (через `MacroContext`: task + mode) для речевого решения вне тика;
 `loop.record_policy(trace)` фиксирует решение в телеметрию следующего тика
 (explainability).
+
+**Escape hatch** (S4-долг): `loop.escape_hatch_active` истинно, когда throttle
+удерживается ≥ `HomeostasisConfig.escape_hatch_ticks` тиков (streak, сброс при
+норме). Даёт право сообщить о перегрузке дешёвым шаблоном без дорогого
+LLM-вызова (recognition heuristic, манифест §3.Е); флаг логируется
+(`escape_hatch`). Отдельно от `throttle.llm_gate`: инициатива запрещена,
+escape hatch разрешён. `escape_hatch_ticks=0` → выключено.
 
 **Коммуникативный вход — событийный** (манифест §3.Е, ADR-0006): тик —
 непрерывный аффективный контур (циркадное, батарея, ресурсы), а текст
@@ -155,6 +165,7 @@ class HostLoop:
     homeostat: Homeostat | None = None          # S4
     throttle_k_scale: float = 0.5               # S4
     throttle_dt_scale: float = 2.0              # S4
+    escape_hatch_ticks: int = 3                 # S4-долг
     policy_config: PolicyConfig | None = None   # S4
     tick_dt: float = 0.01
     clock_mode: str = "synthetic"
@@ -167,15 +178,18 @@ class HostLoop:
     def run(self, max_ticks) -> int: ...
     def close(self) -> None: ...
     # S4:
-    def policy_context(self, *, has_new_message, mode="free") -> PolicyContext: ...
+    def policy_context(self, *, has_new_message, mode="free",
+                       partner=None) -> PolicyContext: ...
     def active_task(self) -> str: ...
     def record_policy(self, trace: PolicyTrace) -> None: ...
+    @property
+    def escape_hatch_active(self) -> bool: ...
 ```
 
 `build_host_loop(config, meter=None)` — колонки под фактический `bus_dim`,
 гомеостат из `config.homeostasis`, `policy_config` из `config.policy`.
 
-## CapabilityGate (gate.py, S4 заготовка)
+## CapabilityGate (gate.py, S4 + гранулярные права)
 
 ```python
 class CapabilityTier(Enum):
@@ -183,14 +197,23 @@ class CapabilityTier(Enum):
     T3 = "autonomous_reversible"; T4 = "bounded_irreversible"
 
 
+class Capability(Enum):
+    READ; THINK; SPEAK; ACT_REVERSIBLE; ACT_IRREVERSIBLE
+
+
 class CapabilityGate:
-    def __init__(self, max_tier=CapabilityTier.T1) -> None: ...
+    def __init__(self, max_tier=CapabilityTier.T1, *, granted=None) -> None: ...
     def request(self, req: ActionRequest) -> GateDecision: ...
+    def grant(self, capability: Capability) -> None: ...
+    def revoke(self, capability: Capability) -> None: ...
 ```
 
-Единая точка side-effect (ADR-0005 §9). Fail-safe deny: `tier > max_tier`
-или необратимое без HITL-токена → отказ. Речь (T1, обратимая) проходит через
-gate для аудита; внешних необратимых действий на S4 нет.
+Единая точка side-effect (ADR-0005 §9). Проверки по порядку: требуемые
+`capabilities ⊆ granted` → tier ≤ max_tier → необратимое требует HITL-токена.
+Fail-safe deny в каждом случае. Гранулярные права (S4-долг) позволяют, напр.,
+под throttle сохранить `SPEAK`, отозвав `THINK` (дорогой инициативный LLM).
+Речь (T1, обратимая) проходит через gate для аудита; внешних необратимых
+действий на S4 нет.
 
 ## ControlChannel (control.py, S4 минимальный)
 
@@ -218,11 +241,13 @@ class ControlChannel:
 3. `time_scale` масштабирует субъективное время (1.0 = жизнь).
 4. Непрерывность: эмоциональный контур всегда включён (ADR-0006).
 5. Non-finite → HostIntegrityError (fail-fast).
-6. Телеметрия: 23 плоских поля (S4).
+6. Телеметрия: 24 плоских поля (S4 + escape hatch).
 7. **Рефлекс ≤ 1 тик:** критический сигнал → throttle в том же тике.
-8. **Обратимость:** throttle восстанавливает базовое `k` при `active=False`.
+8. **Обратимость:** throttle восстанавливает базовое `k` при `active=False`;
+   escape hatch сбрасывается при нормализации сигнала.
 9. **Обратная совместимость:** `homeostat=None` → throttle неактивен;
-   `policy_config=None`/`attention_gate=False` → контур S1–S3.
+   `policy_config=None`/`attention_gate=False` → контур S1–S3;
+   `escape_hatch_ticks=0` → escape hatch выключен.
 
 ## Критерии приёмки (S1)
 
@@ -239,7 +264,9 @@ class ControlChannel:
 - Проекции колонок (reads) — S2+
 - Внешние действия / capability gate в полном виде (T2/HITL) — S5/S6
 - Полный control channel (inject/set/snapshot/restore/freeze/kill) — позже
-- Полный обход attractor/dwell рефлексом — BACKLOG (техдолг)
+- Полный обход attractor/dwell рефлексом — осознанный техдолг (решение
+  2026-10-04, BACKLOG `[S4][reflex]`): throttle + LLM-гейт дают наблюдаемый
+  контракт; полный обход ядра — при реально тяжёлых критических операциях
 
 ## Open Questions
 

@@ -17,6 +17,7 @@ from src.core.policy.models import (
     PolicyContext,
     Preferences,
 )
+from src.tm import PartnerState
 
 
 def _homeostasis(max_deviation: float = 0.0, severity: float = 0.0) -> HomeostasisState:
@@ -36,6 +37,7 @@ def _context(
     has_new_message: bool = False,
     max_deviation: float = 0.0,
     mode: str = "free",
+    partner: PartnerState | None = None,
 ) -> PolicyContext:
     """Собрать контекст policy для теста."""
     return PolicyContext(
@@ -46,6 +48,7 @@ def _context(
         homeostasis=_homeostasis(max_deviation=max_deviation),
         has_new_message=has_new_message,
         mode=mode,
+        partner=partner,
     )
 
 
@@ -84,11 +87,49 @@ class TestEvaluateCandidates:
         assert candidates[Action.RESPOND].pragmatic == 0.0
 
     def test_identify_partner_disabled(self) -> None:
-        """IDENTIFY_PARTNER — заготовка (нулевая ценность на S4)."""
+        """Без модели партнёра IDENTIFY_PARTNER — нулевая ценность (S4)."""
         candidates = {
             c.action: c for c in evaluate_candidates(_context(), Preferences())
         }
         assert candidates[Action.IDENTIFY_PARTNER].value == 0.0
+
+
+class TestPartnerContext:
+    """S5: ToM influences action selection without breaking S4."""
+
+    def test_identify_on_high_uncertainty(self) -> None:
+        """Высокая uncertainty → IDENTIFY_PARTNER получает эпистемическую ценность."""
+        context = _context(
+            has_new_message=True, partner=PartnerState(uncertainty=0.9)
+        )
+        prefs = Preferences(
+            identify_threshold=0.5, pragmatic_weight=0.0, epistemic_weight=1.0
+        )
+        candidates = {c.action: c for c in evaluate_candidates(context, prefs)}
+        assert candidates[Action.IDENTIFY_PARTNER].epistemic == 1.0
+
+    def test_no_identify_when_identified(self) -> None:
+        context = _context(
+            has_new_message=True, partner=PartnerState(uncertainty=0.1)
+        )
+        prefs = Preferences(identify_threshold=0.5, epistemic_weight=1.0)
+        candidates = {c.action: c for c in evaluate_candidates(context, prefs)}
+        assert candidates[Action.IDENTIFY_PARTNER].epistemic == 0.0
+
+    def test_low_trust_scales_respond(self) -> None:
+        """Низкое доверие снижает прагматическую ценность RESPOND."""
+        context = _context(has_new_message=True, partner=PartnerState(trust=0.0))
+        prefs = Preferences(partner_trust_floor=0.5)
+        candidates = {c.action: c for c in evaluate_candidates(context, prefs)}
+        assert candidates[Action.RESPOND].pragmatic == pytest.approx(0.5)
+
+    def test_partner_none_is_s4(self) -> None:
+        """partner=None → RESPOND = 1.0 (поведение S4)."""
+        candidates = {
+            c.action: c
+            for c in evaluate_candidates(_context(has_new_message=True), Preferences())
+        }
+        assert candidates[Action.RESPOND].pragmatic == 1.0
 
 
 class TestSelectAction:

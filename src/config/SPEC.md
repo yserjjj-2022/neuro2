@@ -76,6 +76,7 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `speech` | SpeechConfig() | речь + LLM (S3) |
 | `homeostasis` | HomeostasisConfig() | гомеостаз + throttle (S4) |
 | `policy` | PolicyConfig() | выбор действия (S4) |
+| `social` | SocialConfig() | ToM (S5) |
 
 ### SpeechConfig (S3)
 
@@ -109,6 +110,19 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `mode` | "free" | Режим хоста (game/cooperative/free) |
 | `attention_gate` | False | Пред-колоночная γ (проход 2) |
 
+### SocialConfig (S5)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | False | Включать ToM (иначе S4-совместимость) |
+| `match_threshold` | 0.75 | Порог косинуса для узнавания |
+| `signature_learning_rate` | 0.2 | Скорость обновления сигнатуры |
+| `trust_gain` | 0.1 | Прирост доверия при согласии |
+| `trust_decay` | 0.01 | Утечка доверия |
+| `conflict_threshold` | 0.6 | Порог рассогласования (Vigilance) |
+| `pause_tau_s` | 5.0 | Постоянная нормировки паузы |
+| `identify_threshold` | 0.7 | Порог uncertainty для мягкого интента |
+
 ## Инварианты
 
 1. Валидация fail-fast: `k<1`, `dt<=0`,
@@ -123,6 +137,9 @@ API-настройки эмбеддера — в окружении (`.env`), н
    `HomeostasisConfig`: пустые `setpoints`, `reflex_threshold∉[0,1]`,
    `throttle_k_scale∉(0,1]`, `throttle_dt_scale<1` → ValueError.
    `PolicyConfig`: `mode∉{game,cooperative,free}` → ValueError.
+   `SocialConfig`: `match_threshold`/`conflict_threshold`/`identify_threshold`
+   ∉[0,1], `signature_learning_rate`∉(0,1], `trust_gain`/`trust_decay`<0,
+   `pause_tau_s<=0` → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 

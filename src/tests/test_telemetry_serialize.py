@@ -37,6 +37,12 @@ def _event(**overrides: object) -> TelemetryEvent:
         "homeostasis": 0.0,
         "policy_action": "",
         "policy_reason": "",
+        "escape_hatch": False,
+        "partner_trust": 0.0,
+        "partner_uncertainty": 0.0,
+        "partner_name": "",
+        "pause_s": 0.0,
+        "claim_conflict": 0.0,
         "phase": "phase1",
         "mode": "free",
     }
@@ -56,7 +62,7 @@ def test_serialize_valid(tmp_path: object) -> None:
 
 
 def test_serialize_all_s1_fields() -> None:
-    """S4: все 23 поля присутствуют в JSON."""
+    """S5: все 29 полей присутствуют в JSON."""
     data = json.loads(
         serialize_event(_event(tick=7, gamma=2.5, active_tags="cpu,battery"))
     )
@@ -82,6 +88,12 @@ def test_serialize_all_s1_fields() -> None:
         "homeostasis",
         "policy_action",
         "policy_reason",
+        "escape_hatch",
+        "partner_trust",
+        "partner_uncertainty",
+        "partner_name",
+        "pause_s",
+        "claim_conflict",
         "phase",
         "mode",
     ):
@@ -104,6 +116,7 @@ def test_serialize_memory_fields() -> None:
                 homeostasis=0.8,
                 policy_action="respond",
                 policy_reason="chose respond: new message",
+                escape_hatch=True,
             )
         )
     )
@@ -115,6 +128,7 @@ def test_serialize_memory_fields() -> None:
     assert data["homeostasis"] == 0.8
     assert data["policy_action"] == "respond"
     assert "new message" in data["policy_reason"]
+    assert data["escape_hatch"] is True
 
 
 def test_serialize_nan_raises() -> None:

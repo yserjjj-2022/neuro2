@@ -10,10 +10,13 @@ reflex, ресурсы, drift.
 S2: +3 поля памяти (prior/hit/stored) = 18.
 S3: +`spoke` = 19.
 S4: +4 поля (throttle/homeostasis/policy_action/policy_reason) = 23.
+S4-долг: +`escape_hatch` (право сообщить о перегрузке) = 24.
+S5: +5 социальных полей (partner_trust/uncertainty/name, pause_s,
+claim_conflict) = 29.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 23 поля)
+### TelemetryEvent (frozen dataclass, 29 полей)
 
 ```python
 @dataclass(frozen=True)
@@ -39,6 +42,12 @@ class TelemetryEvent:
     homeostasis: float  # max_deviation гомеостаза (S4)
     policy_action: str  # выбранное действие policy (S4)
     policy_reason: str  # причинная трассировка решения (S4)
+    escape_hatch: bool  # право сообщить о перегрузке под throttle (S4)
+    partner_trust: float  # доверие к партнёру, [0, 1] (S5)
+    partner_uncertainty: float  # неопределённость идентичности (S5)
+    partner_name: str  # принятое имя партнёра, "" если нет (S5)
+    pause_s: float  # интервал с прошлой реплики, с (S5)
+    claim_conflict: float  # рассогласование последнего утверждения (S5)
     phase: str
     mode: str
 ```
@@ -89,6 +98,12 @@ def log(
     homeostasis=0.0,
     policy_action="",
     policy_reason="",
+    escape_hatch=False,
+    partner_trust=0.0,
+    partner_uncertainty=0.0,
+    partner_name="",
+    pause_s=0.0,
+    claim_conflict=0.0,
 ) -> None: ...
 ```
 
@@ -102,9 +117,9 @@ def log(
 4. **Flush после записи** (crash-safety).
 5. **DI через Protocol** `SupportsWrite`.
 
-## Критерии приёмки (S1+S2+S3+S4)
+## Критерии приёмки (S1–S5)
 
-- [x] `TelemetryEvent` — 23 поля, все типизированы
+- [x] `TelemetryEvent` — 29 полей, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)

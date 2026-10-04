@@ -36,6 +36,8 @@ class Preferences:
     silent_stress_gain: float = 0.3  # прирост SILENT со стрессом
     pragmatic_weight: float = 1.0
     epistemic_weight: float = 0.5
+    identify_threshold: float = 0.7      # S5: порог uncertainty для интента
+    partner_trust_floor: float = 0.5     # S5: нижняя граница масштаба RESPOND
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ class PolicyContext:
     homeostasis: HomeostasisState
     has_new_message: bool
     mode: str = "free"  # расширяемое: S6 добавит метакогницию
+    partner: PartnerView | None = None  # S5: ToM; None → S4-совместимость
 
 
 @dataclass(frozen=True)
@@ -79,10 +82,13 @@ def select_action(context, preferences) -> PolicyTrace: ...
 
 | Действие | Триггер | Ценность |
 |---|---|---|
-| `RESPOND` | новое сообщение И `respond_to_messages` | pragmatic=1.0 |
+| `RESPOND` | новое сообщение И `respond_to_messages` | `partner_trust_floor + (1-floor)·trust` (S5) |
 | `SILENT` | всегда (дефолт) | `silent_baseline + silent_stress_gain·conservation(stress)` |
 | `INITIATIVE` | `f > initiative_f_threshold` ИЛИ `homeostatic_alert` и отклонение ≥ `alert_deviation` | pragmatic=1.0 |
-| `IDENTIFY_PARTNER` | заготовка (драйв — S6) | 0.0 |
+| `IDENTIFY_PARTNER` | `partner.uncertainty ≥ identify_threshold` (S5) | epistemic=1.0 |
+
+`PartnerView` — структурный Protocol (S5): policy не импортирует `tm` (без
+цикла); `partner=None` → поведение S4 (RESPOND=1.0, IDENTIFY=0.0).
 
 `value = pragmatic_weight·pragmatic + epistemic_weight·epistemic`. Тай-брейк —
 порядок `Action` (детерминизм). Все пороги — в `Preferences` (CONSTITUTION
@@ -108,5 +114,6 @@ def select_action(context, preferences) -> PolicyTrace: ...
 ## Явно НЕ входит
 
 - **Внешние действия (MCP)** — S5/S6.
-- **Эпистемический драйв / `IDENTIFY_PARTNER`** — S6.
+- **Эпистемический драйв как таковой** — S6 (S5 даёт мягкий интент по
+  `uncertainty`, но не самостоятельный исследовательский драйв).
 - **Полный дискретный слой (pymdp)** — S6.

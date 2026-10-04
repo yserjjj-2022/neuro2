@@ -127,6 +127,7 @@ class SpeechController:
         register: str | None = None,
         new_message: bool = True,
         goal: str | None = None,
+        partner_name: str = "",
     ) -> str | None:
         """Событийный ответ: frame → messages → LLM.
 
@@ -140,6 +141,7 @@ class SpeechController:
             register: Речевой режим (None → default_register).
             new_message: Пришло ли новое сообщение.
             goal: Цель реплики из policy (S4); None → "respond" (S3).
+            partner_name: Принятое имя партнёра (S5); "" → без вокатива.
 
         Returns:
             Текст ответа или None (не отвечаем / сбой LLM).
@@ -160,6 +162,7 @@ class SpeechController:
             precedents=precedents,
             register=register,
             goal=goal or "respond",
+            partner_name=partner_name,
         )
         messages = render_messages(frame, user_text, history=history)
         try:

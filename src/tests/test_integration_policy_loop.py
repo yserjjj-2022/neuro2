@@ -203,6 +203,70 @@ class TestReflexThrottle:
         loop.close()
 
 
+class TestEscapeHatch:
+    """Escape hatch: sustained throttle grants the right to report overload."""
+
+    def _critical_loop(self, tmp_path: Path, escape_ticks: int) -> HostLoop:
+        provider = BatteryProvider(start_level=1.0, drain_per_tick=0.01)
+        loop = _loop_with_homeostat(
+            tmp_path,
+            [provider],
+            setpoints=(Setpoint(tag="battery", comfort=0.5, critical=0.9),),
+        )
+        loop.escape_hatch_ticks = escape_ticks
+        return loop
+
+    def test_escape_hatch_off_by_default_until_streak(self, tmp_path: Path) -> None:
+        """Один тик throttle ещё не даёт escape hatch (анти-дребезг)."""
+        loop = self._critical_loop(tmp_path, escape_ticks=3)
+        for tick in range(90):
+            loop.step_once(tick)
+        loop.step_once(90)  # первый тик throttle
+        assert loop.last_throttle.active is True
+        assert loop.escape_hatch_active is False
+        loop.close()
+
+    def test_escape_hatch_activates_on_sustained_throttle(self, tmp_path: Path) -> None:
+        """Throttle удерживается ≥ порога тиков → escape hatch активен."""
+        loop = self._critical_loop(tmp_path, escape_ticks=3)
+        for tick in range(93):
+            loop.step_once(tick)  # tick 90,91,92 → streak = 3
+        assert loop.escape_hatch_active is True
+        loop.close()
+
+    def test_escape_hatch_logged_in_telemetry(self, tmp_path: Path) -> None:
+        """Флаг escape_hatch виден в телеметрии."""
+        loop = self._critical_loop(tmp_path, escape_ticks=2)
+        for tick in range(92):
+            loop.step_once(tick)
+        loop.close()
+        events = _read_events(tmp_path)
+        assert events[-1]["escape_hatch"] is True
+        assert events[-1]["throttle"] is True
+
+    def test_escape_hatch_disabled_when_zero(self, tmp_path: Path) -> None:
+        """escape_hatch_ticks=0 → escape hatch выключен."""
+        loop = self._critical_loop(tmp_path, escape_ticks=0)
+        for tick in range(93):
+            loop.step_once(tick)
+        assert loop.last_throttle.active is True
+        assert loop.escape_hatch_active is False
+        loop.close()
+
+    def test_escape_hatch_resets_when_signal_norm(self, tmp_path: Path) -> None:
+        """Нормализация сигнала сбрасывает streak и escape hatch."""
+        loop = self._critical_loop(tmp_path, escape_ticks=2)
+        for tick in range(92):
+            loop.step_once(tick)
+        assert loop.escape_hatch_active is True
+        # Убираем сетпоинт battery → сигнал не критичен
+        loop.homeostat = Homeostat(setpoints=(Setpoint(tag="other"),))
+        loop.step_once(92)
+        assert loop.last_throttle.active is False
+        assert loop.escape_hatch_active is False
+        loop.close()
+
+
 class TestResourceThrottleC6:
     """C6: resource overload → throttle (resource feedback)."""
 

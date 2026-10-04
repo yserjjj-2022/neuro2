@@ -37,6 +37,12 @@ class TelemetryEvent:
         homeostasis: Максимальное отклонение гомеостаза — S4.
         policy_action: Выбранное policy действие ("" если не вызывалась) — S4.
         policy_reason: Причина выбора policy (трассировка) — S4.
+        escape_hatch: Право сообщить о перегрузке под удержанным throttle — S4.
+        partner_trust: Доверие к партнёру, [0, 1] — S5.
+        partner_uncertainty: Неопределённость идентичности партнёра — S5.
+        partner_name: Принятое имя партнёра ("" если не объявлено) — S5.
+        pause_s: Интервал с прошлой реплики, с — S5.
+        claim_conflict: Рассогласование последнего утверждения — S5.
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
     """
@@ -62,5 +68,11 @@ class TelemetryEvent:
     homeostasis: float
     policy_action: str
     policy_reason: str
+    escape_hatch: bool
+    partner_trust: float
+    partner_uncertainty: float
+    partner_name: str
+    pause_s: float
+    claim_conflict: float
     phase: str
     mode: str

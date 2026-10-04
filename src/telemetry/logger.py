@@ -80,6 +80,12 @@ class TelemetryLogger:
         homeostasis: float = 0.0,
         policy_action: str = "",
         policy_reason: str = "",
+        escape_hatch: bool = False,
+        partner_trust: float = 0.0,
+        partner_uncertainty: float = 0.0,
+        partner_name: str = "",
+        pause_s: float = 0.0,
+        claim_conflict: float = 0.0,
     ) -> None:
         """Записать событие в лог.
 
@@ -107,6 +113,12 @@ class TelemetryLogger:
             homeostasis: Максимальное отклонение гомеостаза (S4).
             policy_action: Выбранное policy действие ("" если не вызывалась) (S4).
             policy_reason: Причина выбора policy — трассировка (S4).
+            escape_hatch: Право сообщить о перегрузке под удержанным throttle (S4).
+            partner_trust: Доверие к партнёру (S5).
+            partner_uncertainty: Неопределённость идентичности партнёра (S5).
+            partner_name: Принятое имя партнёра (S5).
+            pause_s: Интервал с прошлой реплики, с (S5).
+            claim_conflict: Рассогласование последнего утверждения (S5).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -130,6 +142,12 @@ class TelemetryLogger:
             homeostasis=homeostasis,
             policy_action=policy_action,
             policy_reason=policy_reason,
+            escape_hatch=escape_hatch,
+            partner_trust=partner_trust,
+            partner_uncertainty=partner_uncertainty,
+            partner_name=partner_name,
+            pause_s=pause_s,
+            claim_conflict=claim_conflict,
             phase=self.phase,
             mode=self.mode,
         )

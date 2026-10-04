@@ -23,14 +23,17 @@
 | `core/voting` | [SPEC](src/core/voting/SPEC.md) | [PLAN](src/core/voting/PLAN.md) | [README](src/core/voting/README.md) | ✅ реализовано | S1 |
 | `core/attractors` | [SPEC](src/core/attractors/SPEC.md) | [PLAN](src/core/attractors/PLAN.md) | [README](src/core/attractors/README.md) | ✅ реализовано (опережение) | S4 |
 | `core/homeostasis` | [SPEC](src/core/homeostasis/SPEC.md) | [PLAN](src/core/homeostasis/PLAN.md) | [README](src/core/homeostasis/README.md) | ✅ реализовано (S4) | S4 |
-| `core/policy` | [SPEC](src/core/policy/SPEC.md) | [PLAN](src/core/policy/PLAN.md) | [README](src/core/policy/README.md) | ✅ реализовано (S4) | S4 || `memory` | [SPEC](src/memory/SPEC.md) | [PLAN](src/memory/PLAN.md) | [README](src/memory/README.md) | ✅ store/recall + эмбеддер/приор/роутер (S2) | S2 |
-| `telemetry` | [SPEC](src/telemetry/SPEC.md) | [PLAN](src/telemetry/PLAN.md) | [README](src/telemetry/README.md) | ✅ реализовано (19 полей) | S1/S2/S3 |
+| `core/policy` | [SPEC](src/core/policy/SPEC.md) | [PLAN](src/core/policy/PLAN.md) | [README](src/core/policy/README.md) | ✅ реализовано (S4) | S4 |
+| `memory` | [SPEC](src/memory/SPEC.md) | [PLAN](src/memory/PLAN.md) | [README](src/memory/README.md) | ✅ store/recall + эмбеддер/приор/роутер (S2) | S2 |
+| `telemetry` | [SPEC](src/telemetry/SPEC.md) | [PLAN](src/telemetry/PLAN.md) | [README](src/telemetry/README.md) | ✅ реализовано (24 поля) | S1–S4 |
 | `mcp` | [SPEC](src/mcp/SPEC.md) | [PLAN](src/mcp/PLAN.md) | [README](src/mcp/README.md) | 🟡 контракт; transport ✗ | S1/S2 |
 | `host` | [SPEC](src/host/SPEC.md) | [PLAN](src/host/PLAN.md) | [README](src/host/README.md) | ✅ реализовано (S1/S2/S4) | S1/S2/S4 |
 | `config` | [SPEC](src/config/SPEC.md) | [PLAN](src/config/PLAN.md) | [README](src/config/README.md) | ✅ реализовано (S1/S2/S3/S4) | S1–S4 |
 | `speech` | [SPEC](src/speech/SPEC.md) | [PLAN](src/speech/PLAN.md) | [README](src/speech/README.md) | ✅ реализовано (S3/S4) | S3/S4 |
-| `tm` | — | — | [README](src/tm/README.md) | ✗ не начато | S5 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (551) | все |
+| `tm` | [SPEC](src/tm/SPEC.md) | [PLAN](src/tm/PLAN.md) | [README](src/tm/README.md) | ✅ реализовано (S5) | S5 |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (644) | все |
+
+SPEC стадии — `stages/S5_SPEC.md`, `stages/S5_PLAN.md`.
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
@@ -40,7 +43,8 @@
 
 `S1` честные сигналы → `S2` непрерывность (память+эмбеддер) → `S3` голос ✅ →
 `S4` воля ✅ (проход 1 — ворота; проход 2 — γ-барьер, gate, control,
-макро-контекст) → `S5` социальность (ToM) → `S6` автономия.
+макро-контекст; долги аудита закрыты) → `S5` социальность (ToM) ✅ (сигнатура/
+узнавание/тайминг/ToM→policy, Vigilance, имена, Joint Agency) → `S6` автономия.
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).
 

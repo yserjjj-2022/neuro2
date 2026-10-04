@@ -8,8 +8,10 @@ from src.config import (
     AttractorConfig,
     ColumnParams,
     EnergyConfig,
+    HomeostasisConfig,
     HostConfig,
     MemoryConfig,
+    SocialConfig,
     SpeechConfig,
 )
 from src.core.attractors import TaskAttractor
@@ -170,3 +172,54 @@ class TestSpeechConfig:
 
     def test_host_config_has_speech(self) -> None:
         assert isinstance(HostConfig().speech, SpeechConfig)
+
+
+class TestHomeostasisConfig:
+    """HomeostasisConfig: дефолты и валидация (S4)."""
+
+    def test_defaults(self) -> None:
+        cfg = HomeostasisConfig()
+        assert cfg.reflex_threshold == 0.9
+        assert cfg.escape_hatch_ticks == 3
+        assert len(cfg.setpoints) == 3
+
+    def test_negative_escape_hatch_raises(self) -> None:
+        with pytest.raises(ValueError):
+            HomeostasisConfig(escape_hatch_ticks=-1)
+
+    def test_invalid_throttle_scales_raise(self) -> None:
+        with pytest.raises(ValueError):
+            HomeostasisConfig(throttle_k_scale=0.0)
+        with pytest.raises(ValueError):
+            HomeostasisConfig(throttle_dt_scale=0.5)
+
+    def test_empty_setpoints_raise(self) -> None:
+        with pytest.raises(ValueError):
+            HomeostasisConfig(setpoints=())
+
+
+class TestSocialConfig:
+    """SocialConfig: дефолты и валидация (S5)."""
+
+    def test_defaults(self) -> None:
+        cfg = SocialConfig()
+        assert cfg.enabled is False
+        assert cfg.match_threshold == 0.75
+        assert cfg.pause_tau_s == 5.0
+
+    def test_threshold_out_of_range_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SocialConfig(match_threshold=1.5)
+        with pytest.raises(ValueError):
+            SocialConfig(identify_threshold=-0.1)
+
+    def test_bad_learning_rate_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SocialConfig(signature_learning_rate=0.0)
+
+    def test_bad_tau_raises(self) -> None:
+        with pytest.raises(ValueError):
+            SocialConfig(pause_tau_s=0.0)
+
+    def test_host_config_has_social(self) -> None:
+        assert HostConfig().social.enabled is False

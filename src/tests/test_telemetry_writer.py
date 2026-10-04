@@ -37,6 +37,12 @@ def _event(**overrides: object) -> TelemetryEvent:
         "homeostasis": 0.0,
         "policy_action": "",
         "policy_reason": "",
+        "escape_hatch": False,
+        "partner_trust": 0.0,
+        "partner_uncertainty": 0.0,
+        "partner_name": "",
+        "pause_s": 0.0,
+        "claim_conflict": 0.0,
         "phase": "phase1",
         "mode": "free",
     }

@@ -5,9 +5,12 @@ from __future__ import annotations
 import pytest
 
 from src.speech.intent import (
+    GOAL_INSTRUCTIONS,
     REGISTER_MAX_TOKENS,
     build_intent_frame,
     describe_affect,
+    escape_hatch_message,
+    goal_instruction,
     register_max_tokens,
     render_messages,
 )
@@ -121,3 +124,52 @@ class TestRenderMessages:
         a = render_messages(self._frame(), "x")
         b = render_messages(self._frame(), "x")
         assert a == b
+
+
+class TestGoalGrounding:
+    """Grounding: goal → явная инструкция+scope в system-промпте (S4-долг)."""
+
+    def test_all_goals_have_instruction(self) -> None:
+        for goal in ("respond", "initiative", "identify_partner", "silent"):
+            assert goal in GOAL_INSTRUCTIONS
+            assert GOAL_INSTRUCTIONS[goal] != ""
+
+    def test_unknown_goal_falls_back_to_respond(self) -> None:
+        assert goal_instruction("bogus") == GOAL_INSTRUCTIONS["respond"]
+
+    def test_goal_reaches_system_prompt(self) -> None:
+        frame = build_intent_frame(
+            f=0.0, valence=0.0, stress=0.0, task="t", goal="identify_partner"
+        )
+        system = render_messages(frame, "привет")[0]["content"]
+        assert "мягко уточнить" in system
+
+    def test_goals_produce_different_prompts(self) -> None:
+        respond = build_intent_frame(
+            f=0.0, valence=0.0, stress=0.0, task="t", goal="respond"
+        )
+        initiative = build_intent_frame(
+            f=0.0, valence=0.0, stress=0.0, task="t", goal="initiative"
+        )
+        assert (
+            render_messages(respond, "x")[0]["content"]
+            != render_messages(initiative, "x")[0]["content"]
+        )
+
+
+class TestEscapeHatchMessage:
+    """Дешёвая шаблонная реплика о перегрузке (S4-долг)."""
+
+    def test_deterministic(self) -> None:
+        assert escape_hatch_message(task="tone", stress=0.0) == escape_hatch_message(
+            task="tone", stress=0.0
+        )
+
+    def test_high_stress_phrase(self) -> None:
+        assert "тяжело" in escape_hatch_message(stress=10.0)
+
+    def test_task_context_included(self) -> None:
+        assert "tone" in escape_hatch_message(task="tone", stress=0.0)
+
+    def test_no_task_generic(self) -> None:
+        assert escape_hatch_message(task="none", stress=0.0) != ""

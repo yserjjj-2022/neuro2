@@ -11,20 +11,29 @@ Commands: ``/clear`` (drop dialogue history), ``/quit`` (exit).
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 from src.config import PolicyConfig
-from src.core.policy import Action, select_action
-from src.host.gate import ActionRequest, CapabilityGate, CapabilityTier
+from src.core.policy import Action, PartnerView, select_action
+from src.host.gate import (
+    ActionRequest,
+    Capability,
+    CapabilityGate,
+    CapabilityTier,
+)
 from src.host.loop import HostLoop
 from src.speech.controller import SpeechController
 from src.speech.history import ConversationHistory
+from src.speech.intent import escape_hatch_message
 from src.speech.status import format_status
+from src.tm import JointAgency, PartnerModel, VigilanceGate
 
 logger = logging.getLogger(__name__)
 
 _CLEAR = "/clear"
 _QUIT = "/quit"
+_NAME = "/name "
 
 
 class ChatSession:
@@ -53,6 +62,11 @@ class ChatSession:
         show_status: bool = False,
         policy: PolicyConfig | None = None,
         gate: CapabilityGate | None = None,
+        partner_model: PartnerModel | None = None,
+        pause_tau_s: float = 5.0,
+        clock: Callable[[], float] = time.monotonic,
+        vigilance: VigilanceGate | None = None,
+        joint_agency: JointAgency | None = None,
     ) -> None:
         if ticks_per_turn < 1:
             raise ValueError(f"ticks_per_turn must be >= 1, got {ticks_per_turn}")
@@ -65,8 +79,15 @@ class ChatSession:
         self.show_status = show_status
         self.policy = policy
         self.gate = gate if gate is not None else CapabilityGate()
+        self.partner_model = partner_model
+        self.pause_tau_s = pause_tau_s
+        self.clock = clock
+        self.vigilance = vigilance
+        self.joint_agency = joint_agency
         self._tick = 0
         self._last_message = ""
+        self._last_turn_at: float | None = None
+        self._last_pause_s = 0.0
 
     def _advance_loop(self, message: str) -> None:
         """Прокрутить тики, подав новое сообщение (если есть)."""
@@ -95,8 +116,21 @@ class ChatSession:
             self.history.clear()
             self.output_fn("[история очищена]")
             return True
+        if user_input.startswith(_NAME):
+            # Объявленное имя партнёра (ADR-0008 §4): символ-якорь, не выводим.
+            name = user_input[len(_NAME) :].strip()
+            if self.partner_model is not None and name:
+                self.partner_model.set_name(name)
+            self.output_fn(f"[принято имя: {name}]" if name else "[имя не задано]")
+            return True
         if not user_input:
             return True
+
+        # Тайминг диалога (S5): нормированная пауза с прошлой реплики.
+        now = self.clock()
+        pause_s = 0.0 if self._last_turn_at is None else max(0.0, now - self._last_turn_at)
+        self._last_turn_at = now
+        self._last_pause_s = pause_s
 
         self._advance_loop(user_input)
         self.history.add_user(user_input)
@@ -107,6 +141,26 @@ class ChatSession:
         stress = outcome.result.allostatic_stress if outcome is not None else 0.0
         gamma = outcome.result.gamma if outcome is not None else 0.0
         task = self._active_task()
+
+        # ToM (S5): обновить сигнатуру партнёра по реплике (вне тика).
+        partner = None
+        if self.partner_model is not None:
+            partner = self.partner_model.observe(
+                user_input, pause_s=pause_s, valence=valence, stress=stress
+            )
+
+        # Vigilance Gate (S5): утверждение — гипотеза до подтверждения.
+        # Не блокирует ответ; маркирует рассогласование с накопленным.
+        claim = self.vigilance.observe(user_input) if self.vigilance else None
+
+        # Социальная телеметрия (S5): ToM + тайминг + конфликт утверждения.
+        self.loop.record_social(
+            trust=partner.trust if partner is not None else 0.0,
+            uncertainty=partner.uncertainty if partner is not None else 0.0,
+            name=partner.name if partner is not None else "",
+            pause_s=pause_s,
+            claim_conflict=claim.conflict if claim is not None else 0.0,
+        )
 
         if self.show_status:
             self.output_fn(
@@ -121,25 +175,44 @@ class ChatSession:
                 )
             )
 
-        goal, allow_speak = self._decide_goal(has_new_message=True)
+        # Escape hatch (S4-долг): throttle удерживается → хост сообщает о
+        # перегрузке дешёвым шаблоном, не жгя дорогой LLM-вызов и не
+        # оставаясь в «глухой петле». Право голоса сохраняется.
+        if self.loop.escape_hatch_active:
+            hatch_reply = escape_hatch_message(task=task, stress=stress)
+            self.loop.mark_spoke()
+            self.history.add_assistant(hatch_reply)
+            self.output_fn(hatch_reply)
+            return True
+
+        goal, allow_speak = self._decide_goal(
+            has_new_message=True, partner=partner
+        )
         if not allow_speak:
             self.output_fn("[хост промолчал]")
             return True
 
         # Capability gate (S4): речь — T1 (обратимая), но проходит через
-        # единую точку аудита side-effect (ADR-0005 §9).
+        # единую точку аудита side-effect (ADR-0005 §9). Гранулярные права
+        # (S4-долг): ответ требует только SPEAK; инициатива/идентификация —
+        # ещё и THINK (дорогой инициативный вызов LLM).
+        required = {Capability.SPEAK}
+        if goal in ("initiative", "identify_partner"):
+            required.add(Capability.THINK)
         decision = self.gate.request(
             ActionRequest(
                 name="speak",
                 tier=CapabilityTier.T1,
                 reversible=True,
                 reason=goal or "respond",
+                capabilities=frozenset(required),
             )
         )
         if not decision.allowed:
             self.output_fn("[хост промолчал]")
             return True
 
+        partner_name = partner.name if partner is not None else ""
         reply = self.controller.respond(
             user_text=user_input,
             f=f,
@@ -149,6 +222,7 @@ class ChatSession:
             history=self.history.as_messages()[:-1],  # без текущей реплики
             new_message=True,
             goal=goal,
+            partner_name=partner_name,
         )
         if reply is None:
             self.output_fn("[хост промолчал]")
@@ -158,11 +232,14 @@ class ChatSession:
         self.output_fn(reply)
         return True
 
-    def _decide_goal(self, *, has_new_message: bool) -> tuple[str | None, bool]:
-        """Решить речевое действие через policy (S4) или S3-дефолт.
+    def _decide_goal(
+        self, *, has_new_message: bool, partner: PartnerView | None = None
+    ) -> tuple[str | None, bool]:
+        """Решить речевое действие через policy (S4/S5) или S3-дефолт.
 
         Args:
             has_new_message: Пришло ли новое сообщение оператора.
+            partner: Состояние партнёра (ToM, S5) или None (S4-совместимость).
 
         Returns:
             (goal, allow_speak): цель реплики для IntentFrame и разрешение
@@ -178,7 +255,7 @@ class ChatSession:
             return None, False
 
         context = self.loop.policy_context(
-            has_new_message=has_new_message, mode=self.policy.mode
+            has_new_message=has_new_message, mode=self.policy.mode, partner=partner
         )
         trace = select_action(context, self.policy.preferences)
         self.loop.record_policy(trace)

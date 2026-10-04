@@ -9,6 +9,7 @@ Re-exports:
     SpeechConfig — speech + LLM parameters
     HomeostasisConfig — interoceptive setpoints + throttle (S4)
     PolicyConfig — action selection parameters (S4)
+    SocialConfig — theory-of-mind parameters (S5)
 """
 
 from .params import (
@@ -19,6 +20,7 @@ from .params import (
     HostConfig,
     MemoryConfig,
     PolicyConfig,
+    SocialConfig,
     SpeechConfig,
 )
 
@@ -30,5 +32,6 @@ __all__ = [
     "HostConfig",
     "MemoryConfig",
     "PolicyConfig",
+    "SocialConfig",
     "SpeechConfig",
 ]

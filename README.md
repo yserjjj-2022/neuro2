@@ -57,7 +57,11 @@ telemetry (JSONL)`. **S1 (честные сигналы) завершён:** е�
 (recall → приор в шину, запись на значимых событиях). **S3 (голос) завершён:**
 Intent-Frame + речевые режимы, event-triggered LLM (речевой актюатор,
 reasoning выключен — ADR-0007), история диалога, `--chat`, `--status`.
-437 тестов. Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
+**S4 (воля) завершён:** policy, гомеостаз, reflex-throttle, γ-барьер, gate
+(гранулярные права), escape hatch, grounding IntentFrame. **S5 (социальность)
+завершён:** ToM (сигнатура/узнавание), тайминг диалога, Vigilance Gate,
+имена, Joint Agency. 644 теста.
+Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
 программирование поведения.

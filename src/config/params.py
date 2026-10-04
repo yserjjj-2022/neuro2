@@ -220,6 +220,8 @@ class HomeostasisConfig:
         reflex_threshold: Порог severity для критического сигнала/рефлекса.
         throttle_k_scale: Множитель k-WTA при throttle, (0, 1].
         throttle_dt_scale: Множитель dt при throttle, >= 1.
+        escape_hatch_ticks: Сколько тиков удержания throttle даёт право
+            сообщить оператору о перегрузке (0 → escape hatch выключен).
     """
 
     setpoints: tuple[Setpoint, ...] = (
@@ -230,6 +232,7 @@ class HomeostasisConfig:
     reflex_threshold: float = 0.9
     throttle_k_scale: float = 0.5
     throttle_dt_scale: float = 2.0
+    escape_hatch_ticks: int = 3
 
     def __post_init__(self) -> None:
         """Валидация: непустые сетпоинты, границы порогов.
@@ -251,6 +254,10 @@ class HomeostasisConfig:
         if self.throttle_dt_scale < 1.0:
             raise ValueError(
                 f"throttle_dt_scale must be >= 1, got {self.throttle_dt_scale}"
+            )
+        if self.escape_hatch_ticks < 0:
+            raise ValueError(
+                f"escape_hatch_ticks must be >= 0, got {self.escape_hatch_ticks}"
             )
 
 
@@ -278,6 +285,54 @@ class PolicyConfig:
         """
         if self.mode not in ("game", "cooperative", "free"):
             raise ValueError(f"mode must be game|cooperative|free, got {self.mode!r}")
+
+
+@dataclass(frozen=True)
+class SocialConfig:
+    """Параметры социального контура (S5, ToM).
+
+    Attributes:
+        enabled: Включать ли модель партнёра (иначе S4-совместимость).
+        match_threshold: Порог косинусной близости для узнавания.
+        signature_learning_rate: Скорость обновления сигнатуры, (0, 1].
+        trust_gain: Прирост доверия при согласии, >= 0.
+        trust_decay: Утечка доверия, >= 0.
+        conflict_threshold: Порог рассогласования для гипотезы (Vigilance).
+        pause_tau_s: Постоянная нормировки паузы диалога, с (> 0).
+        identify_threshold: Порог uncertainty для мягкого интента.
+    """
+
+    enabled: bool = False
+    match_threshold: float = 0.75
+    signature_learning_rate: float = 0.2
+    trust_gain: float = 0.1
+    trust_decay: float = 0.01
+    conflict_threshold: float = 0.6
+    pause_tau_s: float = 5.0
+    identify_threshold: float = 0.7
+
+    def __post_init__(self) -> None:
+        """Валидация: пороги в [0, 1], положительные tau/learning_rate.
+
+        Raises:
+            ValueError: При выходе параметров за допустимые границы.
+        """
+        for name in ("match_threshold", "conflict_threshold", "identify_threshold"):
+            value = getattr(self, name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1], got {value}")
+        if not 0.0 < self.signature_learning_rate <= 1.0:
+            raise ValueError(
+                f"signature_learning_rate must be in (0, 1], "
+                f"got {self.signature_learning_rate}"
+            )
+        if self.trust_gain < 0.0 or self.trust_decay < 0.0:
+            raise ValueError(
+                f"trust_gain/trust_decay must be >= 0, "
+                f"got {self.trust_gain}/{self.trust_decay}"
+            )
+        if self.pause_tau_s <= 0.0:
+            raise ValueError(f"pause_tau_s must be > 0, got {self.pause_tau_s}")
 
 
 @dataclass(frozen=True)
@@ -342,6 +397,7 @@ class HostConfig:
     speech: SpeechConfig = field(default_factory=SpeechConfig)
     homeostasis: HomeostasisConfig = field(default_factory=HomeostasisConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
+    social: SocialConfig = field(default_factory=SocialConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""

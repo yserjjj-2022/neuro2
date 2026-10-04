@@ -31,7 +31,7 @@ from src.config import HostConfig, PolicyConfig
 from src.core.cmc import apply_attention, attention_gate
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
 from src.core.homeostasis import HomeostasisState, Homeostat
-from src.core.policy import MacroContext, PolicyContext, PolicyTrace
+from src.core.policy import MacroContext, PartnerView, PolicyContext, PolicyTrace
 from src.host.resources import ResourceMeter, ResourceProvider
 from src.host.sources import BusSegment, SignalBus, default_providers
 from src.host.text_source import TextMessageProvider
@@ -77,6 +77,7 @@ class HostLoop:
     throttle_k_scale: float = 0.5
     throttle_dt_scale: float = 2.0
     throttle_severity_threshold: float = 0.9
+    escape_hatch_ticks: int = 3
     attention_gate: bool = False
     attention_gamma_ref: float = 1.0
     attention_floor: float = 0.0
@@ -110,6 +111,13 @@ class HostLoop:
     _policy_reason_pending: str = field(default="", init=False, repr=False)
     _spoke_pending: bool = field(default=False, init=False, repr=False)
     _base_k: int = field(default=0, init=False, repr=False)
+    _throttle_streak: int = field(default=0, init=False, repr=False)
+    _escape_hatch_pending: bool = field(default=False, init=False, repr=False)
+    _partner_trust_pending: float = field(default=0.0, init=False, repr=False)
+    _partner_uncertainty_pending: float = field(default=0.0, init=False, repr=False)
+    _partner_name_pending: str = field(default="", init=False, repr=False)
+    _pause_s_pending: float = field(default=0.0, init=False, repr=False)
+    _claim_conflict_pending: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -125,6 +133,10 @@ class HostLoop:
             )
         if self.time_scale <= 0.0:
             raise ValueError(f"time_scale must be > 0, got {self.time_scale}")
+        if self.escape_hatch_ticks < 0:
+            raise ValueError(
+                f"escape_hatch_ticks must be >= 0, got {self.escape_hatch_ticks}"
+            )
         # Базовое k запоминается для восстановления после throttle
         # (throttle — обратимая регуляция, а не дрейф конфигурации).
         self._base_k = self.pipeline.voting.k
@@ -266,9 +278,20 @@ class HostLoop:
             dt *= throttle.dt_scale
             k_eff = max(1, round(self._base_k * throttle.k_scale))
             self.pipeline.voting.set_k(k_eff)
+            self._throttle_streak += 1
         else:
             # Обратимость: восстановить базовое k, когда сигнал нормализовался.
             self.pipeline.voting.set_k(self._base_k)
+            self._throttle_streak = 0
+        # Escape hatch (S4-долг): при удержании throttle дольше порога хост
+        # получает право сообщить оператору о перегрузке, не жгя дорогой
+        # инициативный LLM-вызов. Триггер — удержание, а не мгновение
+        # (анти-дребезг). Отдельно от ``llm_gate``: инициатива запрещена,
+        # escape hatch разрешён.
+        self._escape_hatch_pending = (
+            self.escape_hatch_ticks > 0
+            and self._throttle_streak >= self.escape_hatch_ticks
+        )
 
         text = self.message_provider.text_at(tick) if self.message_provider else ""
         has_new_message = bool(text) and text != self._last_text
@@ -349,6 +372,12 @@ class HostLoop:
             homeostasis=(homeostasis.max_deviation if homeostasis is not None else 0.0),
             policy_action=self._policy_action_pending,
             policy_reason=self._policy_reason_pending,
+            escape_hatch=self._escape_hatch_pending,
+            partner_trust=self._partner_trust_pending,
+            partner_uncertainty=self._partner_uncertainty_pending,
+            partner_name=self._partner_name_pending,
+            pause_s=self._pause_s_pending,
+            claim_conflict=self._claim_conflict_pending,
         )
         self._spoke_pending = False
         self._policy_action_pending = ""
@@ -364,21 +393,37 @@ class HostLoop:
         """Отметить, что хост сгенерировал реплику (попадёт в телеметрию)."""
         self._spoke_pending = True
 
+    @property
+    def escape_hatch_active(self) -> bool:
+        """Разрешён ли escape hatch: throttle удерживается ≥ порога тиков.
+
+        Право сообщить оператору о перегрузке без дорогого LLM-вызова
+        (S4-долг). Не путать с ``last_throttle.llm_gate``: инициатива
+        запрещена, escape hatch — разрешён.
+        """
+        return self._escape_hatch_pending
+
     def policy_context(
-        self, *, has_new_message: bool, mode: str = "free"
+        self,
+        *,
+        has_new_message: bool,
+        mode: str = "free",
+        partner: PartnerView | None = None,
     ) -> PolicyContext:
         """Собрать расширяемый контекст policy из состояния хоста.
 
         Policy-слой (S4) решает речевое действие вне тика; loop поставляет
         ему актуальное состояние. Метакогниция (S6) добавится новым полем
-        ``PolicyContext`` без изменения этого метода.
+        ``PolicyContext`` без изменения этого метода. ``partner`` (S5) —
+        модель партнёра из ``tm``; ``None`` → S4-совместимость.
 
         Args:
             has_new_message: Пришло ли новое сообщение оператора.
             mode: Режим хоста (макро-контекст).
+            partner: Состояние партнёра (ToM, S5) или None.
 
         Returns:
-            PolicyContext с F/аффектом/задачей/гомеостазом.
+            PolicyContext с F/аффектом/задачей/гомеостазом/партнёром.
         """
         outcome = self.last_outcome
         homeostasis = self.last_homeostasis
@@ -395,6 +440,7 @@ class HostLoop:
             homeostasis=homeostasis,
             has_new_message=has_new_message,
             mode=macro.mode,
+            partner=partner,
         )
 
     def active_task(self) -> str:
@@ -407,6 +453,30 @@ class HostLoop:
         if 0 <= idx < len(columns):
             return columns[idx].specialization
         return "none"
+
+    def record_social(
+        self,
+        *,
+        trust: float = 0.0,
+        uncertainty: float = 0.0,
+        name: str = "",
+        pause_s: float = 0.0,
+        claim_conflict: float = 0.0,
+    ) -> None:
+        """Зафиксировать социальные метрики для телеметрии следующего тика (S5).
+
+        Args:
+            trust: Доверие к партнёру, [0, 1].
+            uncertainty: Неопределённость идентичности, [0, 1].
+            name: Принятое имя партнёра ("" если нет).
+            pause_s: Интервал с прошлой реплики, с.
+            claim_conflict: Рассогласование последнего утверждения, [0, 1].
+        """
+        self._partner_trust_pending = trust
+        self._partner_uncertainty_pending = uncertainty
+        self._partner_name_pending = name
+        self._pause_s_pending = pause_s
+        self._claim_conflict_pending = claim_conflict
 
     def record_policy(self, trace: PolicyTrace) -> None:
         """Зафиксировать решение policy для телеметрии следующего тика.
@@ -560,6 +630,7 @@ def build_host_loop(
         throttle_k_scale=config.homeostasis.throttle_k_scale,
         throttle_dt_scale=config.homeostasis.throttle_dt_scale,
         throttle_severity_threshold=config.homeostasis.reflex_threshold,
+        escape_hatch_ticks=config.homeostasis.escape_hatch_ticks,
         attention_gate=config.policy.attention_gate,
         policy_config=config.policy,
         tick_dt=config.dt,

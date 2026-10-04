@@ -36,9 +36,16 @@ def _conservation(stress: float) -> float:
 def _evaluate_respond(
     context: PolicyContext, preferences: Preferences
 ) -> tuple[float, float, str]:
-    """Оценка RESPOND: отвечаем на сообщение, если это предпочитаемо."""
+    """Оценка RESPOND: отвечаем на сообщение, если это предпочитаемо.
+
+    S5: доверие к партнёру масштабирует прагматическую ценность (адаптация
+    под персону). ``partner=None`` → прежнее поведение S4.
+    """
     if context.has_new_message and preferences.respond_to_messages:
-        return 1.0, 0.0, "new message and responding preferred"
+        trust = context.partner.trust if context.partner is not None else 1.0
+        trust_floor = preferences.partner_trust_floor
+        scale = trust_floor + (1.0 - trust_floor) * trust
+        return scale, 0.0, "new message and responding preferred"
     if context.has_new_message:
         return 0.0, 0.0, "responding disabled by preferences"
     return 0.0, 0.0, "no new message"
@@ -72,8 +79,18 @@ def _evaluate_initiative(
 def _evaluate_identify(
     context: PolicyContext, preferences: Preferences
 ) -> tuple[float, float, str]:
-    """Оценка IDENTIFY_PARTNER: заготовка (эпистемический драйв — S6)."""
-    return 0.0, 0.0, "epistemic drive disabled (S6)"
+    """Оценка IDENTIFY_PARTNER: мягкий интент при неопределённости (S5).
+
+    Эпистемический драйв как таковой — S6. На S5 высокая неопределённость
+    идентичности партнёра (``uncertainty >= identify_threshold``) даёт
+    эпистемическую ценность > 0 — хост стремится уточнить, кто перед ним
+    (ADR-0008 §5). ``partner=None`` → прежнее поведение S4 (0.0).
+    """
+    if context.partner is None:
+        return 0.0, 0.0, "no partner model (S4)"
+    if context.partner.uncertainty >= preferences.identify_threshold:
+        return 0.0, 1.0, "high partner uncertainty"
+    return 0.0, 0.0, "partner identified"
 
 
 def evaluate_candidates(
