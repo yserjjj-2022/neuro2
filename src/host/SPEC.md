@@ -56,7 +56,14 @@ Throttle обратим: базовое `k` восстанавливается �
 **Policy-контекст** (S4): `loop.policy_context(...)` собирает `PolicyContext`
 (через `MacroContext`: task + mode) для речевого решения вне тика;
 `loop.record_policy(trace)` фиксирует решение в телеметрию следующего тика
-(explainability).
+(explainability). S6 добавляет `PolicyContext.metacognition` (снимок
+`SelfMonitor`) — read-only, `None` → S5-совместимость.
+
+**Автономия** (S6): при `autonomy.enabled=True` loop владеет `SelfMonitor`
+(`selfcontrol`), обновляет наблюдаемые на каждом тике (не влияя на F того же
+тика) и логирует `metacog_*`/`reset_level`/`change_kind`. `consolidate_memory()`
+выполняет явную консолидацию памяти (pruning + схемы) и логирует число
+удалённых (инвариант 6). `autonomy.enabled=False` → контур S5 идентичен.
 
 **Escape hatch** (S4-долг): `loop.escape_hatch_active` истинно, когда throttle
 удерживается ≥ `HomeostasisConfig.escape_hatch_ticks` тиков (streak, сброс при
@@ -177,14 +184,38 @@ class HostLoop:
     def step_once(self, tick) -> TickOutcome: ...
     def run(self, max_ticks) -> int: ...
     def close(self) -> None: ...
-    # S4:
+    # S4/S5/S6:
     def policy_context(self, *, has_new_message, mode="free",
                        partner=None) -> PolicyContext: ...
     def active_task(self) -> str: ...
     def record_policy(self, trace: PolicyTrace) -> None: ...
+    def record_social(self, *, trust=0.0, uncertainty=0.0, name="",
+                      pause_s=0.0, claim_conflict=0.0) -> None: ...  # S5
+    def consolidate_memory(self) -> int: ...                         # S6
+    def record_consolidation(self, pruned: int) -> None: ...         # S6
+    def explore(self, *, reason="epistemic drive") -> ProbeResult | None: ...  # S6 п2
     @property
     def escape_hatch_active(self) -> bool: ...
 ```
+
+`probe_effector: ProbeEffector | None` — создаётся при `config.autonomy.enabled`
+(карта аффордансов + gate). `explore()` — мягкий драйв: зондирует только при
+неопределённости выше `autonomy.explore_threshold` и наличии обратимого
+аффорданса; результат идёт в телеметрию следующего тика.
+
+## ProbeEffector (probe.py, S6 проход 2)
+
+```python
+class ProbeEffector:
+    def __init__(self, *, affordances=None, gate=None, probe_fn=None) -> None: ...
+    def probe(self, request: ProbeRequest, *, hitl_token=None) -> ProbeResult: ...
+```
+
+Shell: исполняет эпистемическое зондирование через `CapabilityGate` (ADR-0005
+§9, fail-safe deny). Обратимый аффорданс → T3/`ACT_REVERSIBLE`; необратимый →
+T4/`ACT_IRREVERSIBLE` (нужен HITL-токен). Неизвестный аффорданс, отказ gate и
+сбой транспорта → `ProbeResult(success=False)` без исключений (не роняет тик).
+Транспорт инъецируется (`probe_fn`); по умолчанию — детерминированный mock.
 
 `build_host_loop(config, meter=None)` — колонки под фактический `bus_dim`,
 гомеостат из `config.homeostasis`, `policy_config` из `config.policy`.

@@ -269,6 +269,70 @@ class TestCanonicalScenarios:
         assert any(e["memory_hit"] for e in events2), "recall found nothing"
 
 
+class TestLongHorizon:
+    """C10: длинный горизонт (VALIDATION.md §3, S6 проход 2).
+
+    Проверяем устойчивость организма на длинном прогоне: отсутствие тихого
+    дрейфа, ограниченность, невырождение активности и детерминизм. Значения
+    эталона — в VALIDATION.md §4 (S6, C10); тест утверждает ИНВАРИАНТЫ, а не
+    точные числа (VALIDATION.md §5).
+    """
+
+    def _run(self, tmp_path: Path, ticks: int = 1500) -> list[dict]:
+        """Длинный прогон с автономией и памятью (детерминированный)."""
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(
+                db_path=str(tmp_path / "mem.db"), embedder_mode="fake"
+            ),
+        )
+        loop = build_host_loop(config, meter=FakeMeter())
+        loop.run(ticks)
+        loop.close()
+        return _events(tmp_path)
+
+    def test_c10_no_silent_drift(self, tmp_path: Path) -> None:
+        """C10: длинный горизонт без тихого дрейфа (инвариант §2.11)."""
+        events = self._run(tmp_path)
+        fp = behavioral_fingerprint(events)
+
+        # Тихого дрейфа нет: детектор не срабатывает за 1500 тиков.
+        assert fp["drift_events"] == 0
+        # Классификатор не деградирует: только stable/development, не drift.
+        kinds = {e["change_kind"] for e in events}
+        assert kinds <= {"", "stable", "development"}, kinds
+        _assert_no_nan(events)
+
+    def test_c10_bounded_and_active(self, tmp_path: Path) -> None:
+        """C10: ограниченность и невырождение активности на длинном горизонте."""
+        events = self._run(tmp_path)
+        fp = behavioral_fingerprint(events)
+
+        assert np.isfinite(fp["f_max"]) and fp["f_max"] < 1e3
+        assert np.isfinite(fp["stress_max"]) and fp["stress_max"] < 1e3
+        # Активность не коллапсирует: нет длинной серии тиков без активных колонок.
+        longest = _longest_zero_streak([e["active_columns"] for e in events])
+        assert longest <= 10, f"activity collapse: {longest} zero-active ticks"
+
+    def test_c10_determinism_long_horizon(self, tmp_path: Path) -> None:
+        """C10: одинаковый seed → одинаковый отпечаток на длинном горизонте."""
+        events_a = self._run(tmp_path / "a")
+        events_b = self._run(tmp_path / "b")
+        fp_a = behavioral_fingerprint(events_a)
+        fp_b = behavioral_fingerprint(events_b)
+
+        assert fp_a == fp_b
+
+
+def _longest_zero_streak(values: list[int]) -> int:
+    """Длина самой длинной серии нулевой активности (чистая)."""
+    best = current = 0
+    for value in values:
+        current = current + 1 if value == 0 else 0
+        best = max(best, current)
+    return best
+
+
 class TestOrganismInvariants:
     """Инварианты организма (VALIDATION.md §2), применимые к S1."""
 
@@ -361,7 +425,7 @@ class TestS4Gates:
         loop.close()
 
         assert trace.reason != ""
-        assert len(trace.candidates) == 4
+        assert len(trace.candidates) == 5
         winner = next(c for c in trace.candidates if c.action is trace.chosen)
         assert winner.value == max(c.value for c in trace.candidates)
 

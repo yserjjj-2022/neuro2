@@ -27,22 +27,38 @@ from pathlib import Path
 
 import numpy as np
 
-from src.config import HostConfig, PolicyConfig
+from src.config import AutonomyConfig, HostConfig, PolicyConfig
 from src.core.cmc import apply_attention, attention_gate
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
 from src.core.homeostasis import HomeostasisState, Homeostat
 from src.core.policy import MacroContext, PartnerView, PolicyContext, PolicyTrace
+from src.core.selfcontrol import SelfMonitor
+from src.host.gate import (
+    Capability,
+    CapabilityGate,
+    CapabilityTier,
+)
+from src.host.probe import ProbeEffector, ProbeFn
 from src.host.resources import ResourceMeter, ResourceProvider
 from src.host.sources import BusSegment, SignalBus, default_providers
 from src.host.text_source import TextMessageProvider
 from src.host.throttle import ThrottlePlan, plan_throttle
 from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
+from src.integrations import IntegrationRegistry, to_affordances
+from src.mcp.probe import (
+    AffordanceMap,
+    ProbeRequest,
+    ProbeResult,
+    default_affordances,
+    select_affordance,
+)
 from src.memory import (
     MemoryRouter,
     MemoryStore,
     build_embedder,
     embedder_settings_from_env,
 )
+from src.memory.consolidation import should_consolidate
 from src.telemetry import TelemetryLogger, TelemetryWriter
 
 
@@ -89,6 +105,9 @@ class HostLoop:
     time_scale: float = 1.0
     memory: MemoryRouter | None = None
     message_provider: TextMessageProvider | None = None
+    selfcontrol: SelfMonitor | None = None
+    autonomy_config: AutonomyConfig | None = None
+    probe_effector: ProbeEffector | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
     _prev_f: float = field(default=0.0, init=False, repr=False)
@@ -118,6 +137,16 @@ class HostLoop:
     _partner_name_pending: str = field(default="", init=False, repr=False)
     _pause_s_pending: float = field(default=0.0, init=False, repr=False)
     _claim_conflict_pending: float = field(default=0.0, init=False, repr=False)
+    _metacog_conflict_pending: float = field(default=0.0, init=False, repr=False)
+    _metacog_metastability_pending: float = field(default=0.0, init=False, repr=False)
+    _metacog_saturation_pending: float = field(default=0.0, init=False, repr=False)
+    _reset_level_pending: str = field(default="", init=False, repr=False)
+    _change_kind_pending: str = field(default="", init=False, repr=False)
+    _consolidated_pruned_pending: int = field(default=0, init=False, repr=False)
+    _last_consolidation_tick: int = field(default=0, init=False, repr=False)
+    _current_tick: int = field(default=0, init=False, repr=False)
+    _probe_affordance_pending: str = field(default="", init=False, repr=False)
+    _probe_success_pending: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -249,6 +278,7 @@ class HostLoop:
         Raises:
             HostIntegrityError: Если аффективные метрики не конечны.
         """
+        self._current_tick = tick
         dt, now = self._time_for_tick(tick)
 
         # Сенсорная фаза (включая эмбеддинг — сетевой I/O) НЕ входит в
@@ -329,6 +359,29 @@ class HostLoop:
         drift = self.drift.update(outcome.result)
         self.meter.record_tick(time.perf_counter() - compute_start)
 
+        # Selfcontrol (S6, read-only): наблюдаемые + план сброса. Не влияет на
+        # F(t) того же тика (анти-circularity, ADR-0009 §1). Сбой → безопасный
+        # дефолт, loop жив (инвариант 1).
+        if self.selfcontrol is not None:
+            metacognition, reset_plan = self.selfcontrol.observe(
+                scores=outcome.activities
+                if outcome.activities is not None
+                else np.zeros(1),
+                switched=outcome.switched,
+                f=outcome.result.f,
+                partner_uncertainty=self._partner_uncertainty_pending,
+            )
+            self._metacog_conflict_pending = metacognition.conflict
+            self._metacog_metastability_pending = metacognition.metastability
+            self._metacog_saturation_pending = metacognition.saturation
+            self._reset_level_pending = (
+                reset_plan.level.value if reset_plan.triggered else ""
+            )
+            assessment = self.selfcontrol.last_assessment
+            self._change_kind_pending = (
+                assessment.kind.value if assessment is not None else ""
+            )
+
         memory_prior_value = 0.0
         memory_hit = False
         episode_stored = False
@@ -350,6 +403,10 @@ class HostLoop:
             episode_stored = stored_id is not None
 
         self._prev_f = outcome.result.f
+
+        # Ночной цикл (S6 проход 2): консолидация по расписанию/объёму.
+        # Вне аффективного контура: не влияет на F этого тика (инвариант 6).
+        self._maybe_consolidate(tick, now)
 
         self.logger.log(
             free_energy=outcome.result.f,
@@ -378,10 +435,21 @@ class HostLoop:
             partner_name=self._partner_name_pending,
             pause_s=self._pause_s_pending,
             claim_conflict=self._claim_conflict_pending,
+            metacog_conflict=self._metacog_conflict_pending,
+            metacog_metastability=self._metacog_metastability_pending,
+            metacog_saturation=self._metacog_saturation_pending,
+            reset_level=self._reset_level_pending,
+            change_kind=self._change_kind_pending,
+            consolidated_pruned=self._consolidated_pruned_pending,
+            probe_affordance=self._probe_affordance_pending,
+            probe_success=self._probe_success_pending,
         )
         self._spoke_pending = False
         self._policy_action_pending = ""
         self._policy_reason_pending = ""
+        self._consolidated_pruned_pending = 0
+        self._probe_affordance_pending = ""
+        self._probe_success_pending = False
         self.last_outcome = outcome
         self.last_drift = drift
         self.last_memory_hit = memory_hit
@@ -441,6 +509,11 @@ class HostLoop:
             has_new_message=has_new_message,
             mode=macro.mode,
             partner=partner,
+            metacognition=(
+                self.selfcontrol.metacognition
+                if self.selfcontrol is not None
+                else None
+            ),
         )
 
     def active_task(self) -> str:
@@ -477,6 +550,116 @@ class HostLoop:
         self._partner_name_pending = name
         self._pause_s_pending = pause_s
         self._claim_conflict_pending = claim_conflict
+
+    def record_consolidation(self, pruned: int) -> None:
+        """Зафиксировать число удалённых при консолидации эпизодов (S6).
+
+        Args:
+            pruned: Сколько эпизодов удалено (попадёт в телеметрию).
+        """
+        self._consolidated_pruned_pending = pruned
+
+    def consolidate_memory(self) -> int:
+        """Выполнить явную консолидацию памяти (S6) и вернуть число удалённых.
+
+        Требует ``autonomy``-параметров и включённой памяти. Удаление логируется
+        (инвариант 6). Возвращает 0, если память/автономия выключены.
+
+        Returns:
+            Число удалённых эпизодов.
+        """
+        return self._consolidate(self.clock(), self._current_tick)
+
+    def _consolidate(self, now: float, tick: int) -> int:
+        """Исполнить консолидацию в момент ``now`` (Shell, общий путь).
+
+        Args:
+            now: Время для расчёта давности эпизодов.
+            tick: Тик, к которому привязывается консолидация.
+
+        Returns:
+            Число удалённых эпизодов.
+        """
+        if self.memory is None or self.autonomy_config is None:
+            return 0
+        from src.memory import consolidate
+
+        result = consolidate(
+            self.memory.store,
+            min_weight=self.autonomy_config.consolidate_min_weight,
+            schema_threshold=self.autonomy_config.schema_threshold,
+            max_schemas=self.autonomy_config.max_schemas,
+            now=now,
+            recency_tau_s=self.autonomy_config.recency_tau_s,
+        )
+        self.record_consolidation(result.pruned)
+        self._last_consolidation_tick = tick
+        return result.pruned
+
+    def _maybe_consolidate(self, tick: int, now: float) -> None:
+        """Запустить ночной цикл, если пора (S6 проход 2).
+
+        Триггер — по расписанию (``consolidate_every_ticks``) и объёму
+        (``consolidate_min_episodes``). Вызывается в конце тика: удаление
+        логируется в телеметрию **этого** тика (инвариант 6). Выключено при
+        ``every_ticks == 0`` (S5/S6-проход-1-совместимость). Время берётся из
+        источника loop (``now``), чтобы synthetic-прогон оставался
+        детерминированным.
+
+        Args:
+            tick: Текущий тик.
+            now: Время текущего тика (из ``_time_for_tick``).
+        """
+        if self.memory is None or self.autonomy_config is None:
+            return
+        trigger = should_consolidate(
+            tick=tick,
+            last_tick=self._last_consolidation_tick,
+            episode_count=self.memory.episode_count(),
+            every_ticks=self.autonomy_config.consolidate_every_ticks,
+            min_episodes=self.autonomy_config.consolidate_min_episodes,
+        )
+        if trigger.due:
+            self._consolidate(now, tick)
+
+    def explore(self, *, reason: str = "epistemic drive") -> ProbeResult | None:
+        """Выполнить эпистемическое зондирование (S6 проход 2).
+
+        Мягкий драйв: зондируем только если метакогнитивная неопределённость
+        выше порога пресета и доступен обратимый аффорданс. Исполнение идёт
+        через capability gate (fail-safe deny). Результат попадёт в телеметрию
+        следующего тика (как ``record_policy``).
+
+        Args:
+            reason: Причина зондирования (для аудита).
+
+        Returns:
+            ProbeResult или None (нет effector'а / неопределённость ниже порога).
+        """
+        if self.probe_effector is None:
+            return None
+        uncertainty = (
+            self.selfcontrol.metacognition.epistemic_uncertainty
+            if self.selfcontrol is not None
+            and self.selfcontrol.metacognition is not None
+            else 0.0
+        )
+        threshold = (
+            self.autonomy_config.explore_threshold
+            if self.autonomy_config is not None
+            else 1.0
+        )
+        affordance = select_affordance(
+            uncertainty, self.probe_effector.affordances, threshold=threshold
+        )
+        if affordance is None:
+            return None
+        result = self.probe_effector.probe(
+            ProbeRequest(affordance=affordance.name, reason=reason)
+        )
+        self._probe_affordance_pending = result.affordance
+        self._probe_success_pending = result.success
+        return result
 
     def record_policy(self, trace: PolicyTrace) -> None:
         """Зафиксировать решение policy для телеметрии следующего тика.
@@ -524,6 +707,9 @@ def build_host_loop(
     config: HostConfig | None = None,
     meter: ResourceMeter | None = None,
     messages: tuple[tuple[int, str], ...] = (),
+    integrations: IntegrationRegistry | None = None,
+    probe_fn: ProbeFn | None = None,
+    affordances: AffordanceMap | None = None,
 ) -> HostLoop:
     """Собрать host loop: провайдеры → шина → колонки → конвейер → телеметрия.
 
@@ -538,6 +724,11 @@ def build_host_loop(
             запусками — см. ADR-0006, stages/S1_SPEC.md §5).
         messages: Скрипт коммуникативных сообщений ``(tick, text)`` для
             ``TextMessageProvider`` (S2; в S3 заменится живым вводом).
+        integrations: Реестр интеграций (ADR-0011). None → карта аффордансов
+            из ``default_affordances()`` (совместимость S6).
+        probe_fn: Реальный транспорт зондирования (ADR-0011). None → mock.
+        affordances: Готовая карта аффордансов (приоритетнее реестра). None →
+            из реестра, иначе ``default_affordances()``.
 
     Returns:
         Готовый к ``run()`` HostLoop.
@@ -611,6 +802,40 @@ def build_host_loop(
         reflex_threshold=config.homeostasis.reflex_threshold,
     )
 
+    selfcontrol: SelfMonitor | None = None
+    probe_effector: ProbeEffector | None = None
+    if config.autonomy.enabled:
+        selfcontrol = SelfMonitor(
+            window=config.autonomy.metacog_window,
+            variance_gain=config.autonomy.csd_variance_gain,
+            autocorr_gain=config.autonomy.csd_autocorr_gain,
+            warning_threshold=config.autonomy.csd_warning_threshold,
+            soft_threshold=config.autonomy.reset_soft_threshold,
+        )
+        # MCP-зондирование (S6 проход 2): карта аффордансов + gate. Права —
+        # обратимое действие автономно (T3), необратимое — с HITL (T4).
+        # ADR-0011: карта берётся из реестра интеграций, если он передан;
+        # иначе — прежний default_affordances() (совместимость S6).
+        if affordances is None:
+            if integrations is not None:
+                affordances = to_affordances(integrations.specs)
+            else:
+                affordances = default_affordances()
+        probe_effector = ProbeEffector(
+            affordances=affordances,
+            gate=CapabilityGate(
+                max_tier=CapabilityTier.T4,
+                granted=frozenset(
+                    {
+                        Capability.READ,
+                        Capability.ACT_REVERSIBLE,
+                        Capability.ACT_IRREVERSIBLE,
+                    }
+                ),
+            ),
+            probe_fn=probe_fn,
+        )
+
     return HostLoop(
         bus=bus,
         pipeline=pipeline,
@@ -640,4 +865,7 @@ def build_host_loop(
         time_scale=config.time_scale,
         memory=memory,
         message_provider=message_provider,
+        selfcontrol=selfcontrol,
+        autonomy_config=config.autonomy,
+        probe_effector=probe_effector,
     )

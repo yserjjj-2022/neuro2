@@ -14,6 +14,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.config import (
+    AutonomyConfig,
     HostConfig,
     MemoryConfig,
     PolicyConfig,
@@ -21,6 +22,8 @@ from src.config import (
     SpeechConfig,
 )
 from src.host.loop import HostLoop, build_host_loop
+from src.integrations import load_integrations
+from src.integrations.runtime import connect_probe_transport
 from src.speech import (
     ChatSession,
     ConversationHistory,
@@ -170,6 +173,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Отключить ToM (S5): контур S4 без модели партнёра.",
     )
+    parser.add_argument(
+        "--no-autonomy",
+        action="store_true",
+        help="Отключить автономию (S6): контур S5 без selfcontrol.",
+    )
+    parser.add_argument(
+        "--consolidate",
+        action="store_true",
+        help="Выполнить явную консолидацию памяти (S6) и выйти.",
+    )
+    parser.add_argument(
+        "--night-every",
+        type=int,
+        default=0,
+        help="Интервал ночного цикла консолидации, тики (0 = выключен).",
+    )
+    parser.add_argument(
+        "--night-min-episodes",
+        type=int,
+        default=0,
+        help="Минимум эпизодов для срабатывания ночного цикла.",
+    )
+    parser.add_argument(
+        "--integrations",
+        type=str,
+        default=None,
+        help="Путь к TOML-override реестра интеграций (ADR-0011).",
+    )
     return parser.parse_args(argv)
 
 
@@ -258,6 +289,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = _parse_args(argv)
     social = SocialConfig(enabled=not args.no_social)
+    autonomy = AutonomyConfig(
+        enabled=not args.no_autonomy,
+        consolidate_every_ticks=args.night_every,
+        consolidate_min_episodes=args.night_min_episodes,
+    )
+
+    # Реестр интеграций (ADR-0011): каталог + реальные MCP-клиенты. Без флага
+    # поведение S6 идентично (default_affordances + mock-транспорт).
+    integrations = None
+    probe_fn = None
+    probe_affordances = None
+    probe_clients: tuple = ()
+    if args.integrations:
+        integrations = load_integrations(Path(args.integrations))
+        probe_fn, probe_clients = connect_probe_transport(integrations)
+        if probe_fn is not None:
+            # Аффордансы — по фактическим тулам подключённых серверов.
+            probe_affordances = probe_fn.affordances()
 
     loop: HostLoop = build_host_loop(
         HostConfig(
@@ -283,8 +332,18 @@ def main(argv: list[str] | None = None) -> int:
             ),
             policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
             social=social,
-        )
+            autonomy=autonomy,
+        ),
+        integrations=integrations,
+        probe_fn=probe_fn,
+        affordances=probe_affordances,
     )
+
+    if args.consolidate:
+        pruned = loop.consolidate_memory()
+        logger.info("Consolidation done: %d episodes pruned", pruned)
+        loop.close()
+        return 0
 
     if args.chat:
         return _run_chat(loop, args, social)
@@ -318,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
             executed = loop.run(args.ticks)
     finally:
         loop.close()
+        for client in probe_clients:
+            client.close()
 
     logger.info("Done: %d ticks written to %s", executed, args.log)
     return 0

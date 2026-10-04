@@ -33,11 +33,15 @@ class TickOutcome:
         result: Аффективные метрики (F, valence, stress, gamma).
         active_tags: Теги сегментов шины с ошибкой выше порога.
         reflex_tags: Теги критических сигналов текущего тика.
+        activities: Активности колонок (‖e‖²) — вход selfcontrol (S6).
+        switched: Сменился ли аттрактор на этом тике (S6).
     """
 
     result: FreeEnergyResult
     active_tags: tuple[str, ...]
     reflex_tags: tuple[str, ...]
+    activities: Vector | None = None
+    switched: bool = False
 
 
 @dataclass(frozen=True)
@@ -95,7 +99,9 @@ class CMCPipeline:
         # Активности колонок = ‖e‖² по строкам errors → вход для k-WTA
         activities = np.sum(out.errors**2, axis=1)
         self.voting.vote(activities)
+        prev_mask = self.attractor.current_mask
         self.attractor.tick(activities)
+        switched = _attractor_switched(prev_mask, self.attractor.current_mask)
 
         active_tags: tuple[str, ...] = ()
         if segments:
@@ -108,7 +114,24 @@ class CMCPipeline:
             result=result,
             active_tags=active_tags,
             reflex_tags=reflex_tags,
+            activities=activities,
+            switched=switched,
         )
+
+
+def _attractor_switched(prev_mask: Vector | None, cur_mask: Vector | None) -> bool:
+    """Сменился ли аттрактор между тиками (по маске победителя, S6).
+
+    Args:
+        prev_mask: Маска до tick() (None на первом тике).
+        cur_mask: Маска после tick().
+
+    Returns:
+        True, если индекс победителя изменился.
+    """
+    if prev_mask is None or cur_mask is None:
+        return False
+    return int(np.argmax(prev_mask)) != int(np.argmax(cur_mask))
 
 
 def _segment_tags_above(
