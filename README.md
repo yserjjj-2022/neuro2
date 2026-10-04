@@ -5,7 +5,7 @@
 ## Навигация по проекту
 
 - [`INTENT.md`](INTENT.md) — зачем проект: выращивание, а не программирование
-- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S6, ворота
+- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S7, ворота
 - [`VALIDATION.md`](VALIDATION.md) — проверка, сценарии, инварианты
 - [`SPECS.md`](SPECS.md) — реестр модульных спецификаций
 - [`CONSTITUTION.md`](CONSTITUTION.md) — правила проекта
@@ -38,12 +38,17 @@ src/
 │   ├── cmc/        # Canonical Microcircuits
 │   ├── energy/     # Free Energy, valence
 │   ├── voting/     # k-WTA lateral inhibition
-│   └── attractors/ # Task attractors (STP)
-├── host/           # Обвязка: wiring (pipeline), sources (сенсорика)
-├── memory/         # SQLite + sqlite-vec
+│   ├── attractors/ # Task attractors (STP)
+│   ├── homeostasis/# Гомеостаз (S4)
+│   ├── policy/     # Выбор действия (S4/S6)
+│   ├── selfcontrol/# Метакогниция, дрейф, сброс (S6)
+│   └── factorization/# Разреженный дискретный слой (S6)
+├── host/           # Обвязка: wiring, sources, fingerprint/diagnostic (S7)
+├── memory/         # SQLite + sqlite-vec + консолидация (S6)
 ├── speech/         # Intent-Frame, LLM-актюатор, диалог (S3)
-├── mcp/            # Контракт сигналов; MCP transport (не реализован)
-├── tm/             # Theory of Mind (не реализовано)
+├── mcp/            # Контракт сигналов + карта аффордансов + MCP-клиент (stdio)
+├── integrations/   # Реестр подключений (каталог) + сборка runtime (ADR-0011)
+├── tm/             # Theory of Mind (S5)
 ├── telemetry/      # Логирование, самодиагностика
 └── config/         # Конфигурация
 ```
@@ -60,7 +65,17 @@ reasoning выключен — ADR-0007), история диалога, `--chat
 **S4 (воля) завершён:** policy, гомеостаз, reflex-throttle, γ-барьер, gate
 (гранулярные права), escape hatch, grounding IntentFrame. **S5 (социальность)
 завершён:** ToM (сигнатура/узнавание), тайминг диалога, Vigilance Gate,
-имена, Joint Agency. 644 теста.
+имена, Joint Agency. **S6 (автономия) завершён:** самоконтроль (метакогниция,
+critical slowing down, протокол сброса), консолидация памяти (pruning + схемы,
+ночной цикл по расписанию), эпистемический драйв `Action.EXPLORE` (реальный
+эффектор: карта аффордансов + gated-зондирование), NumPy-факторизация
+(mode/partner/task), длинный горизонт C10. **S7 (HITL-диагностика)
+запланирован:** формальный sensitivity-harness (числа/ручки), пресеты
+(Python+TOML), диалоговая диагностика (пробы + ветвление по ответам),
+самоотчёт сброса (ADR-0010). **Реестр интеграций + MCP-транспорт реализован**
+(ADR-0011): каталог подключений (Python-база + TOML-override) + реальные
+MCP-серверы (stdio) вместо mock-зондирования, флаг `--integrations PATH`.
+819 тестов.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
