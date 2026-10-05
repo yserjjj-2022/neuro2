@@ -11,6 +11,8 @@
 - `control.py` — `ControlChannel` (status/pause/resume/step, S4).
 - `fingerprint.py` — `BehavioralFingerprint`/`behavioral_fingerprint`/
   `fingerprint_distance` (числовой отпечаток прогона, S7-A).
+- `sensitivity.py` — `SensitivityCase`/`build_sensitivity_matrix`/
+  `check_direction` + `SensitivityRunner` (harness чувствительности, S7-A).
 - `loop.py` — `HostLoop`: время (synthetic/wall, time_scale), precision,
   гомеостаз, throttle, attention-барьер, ресурсы, guard, drift, память
   (recall→приор, запись), policy-контекст, телеметрия.

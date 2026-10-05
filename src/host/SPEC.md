@@ -289,6 +289,7 @@ class BehavioralFingerprint:
     talk_rate: float         # доля тиков с репликой, [0, 1]
     throttle_rate: float
     explore_rate: float
+    initiative_rate: float
 
     def metric(self, name: str) -> float: ...
 
@@ -304,6 +305,39 @@ def regression_fingerprint(events, valence_significance=1.0) -> dict[str, float]
 `regression_fingerprint` — историческая подробная сводка поведенческого
 регресса, перенесена из тестов без изменения поведения (тест-хелпер
 реэкспортирует её под прежним именем).
+
+## Sensitivity harness (sensitivity.py, S7-A)
+
+Формальный тест чувствительности к ручкам (ADR-0010 §3): матрица возмущений +
+проверка **инвариантов направления**, а не точных значений (точные — калибровка,
+BACKLOG `[S4][policy]`). Два входа: pytest-гейт (`test_sensitivity.py`) и CLI
+`--sensitivity` (ADR-0010 §7).
+
+```python
+@dataclass(frozen=True)
+class SensitivityCase:
+    knob: str
+    values: tuple[float, ...]
+    metric: str        # имя метрики BehavioralFingerprint
+    direction: str     # "nondecreasing" | "nonincreasing" | "bounded"
+
+
+def build_sensitivity_matrix() -> tuple[SensitivityCase, ...]: ...
+def check_direction(metric_values, *, direction, tol=1e-9) -> bool: ...
+
+
+class SensitivityRunner:
+    def __init__(self, *, ticks=120, workdir=None) -> None: ...
+    def run_case(self, case, *, seed, ticks=None) -> tuple[float, ...]: ...
+    def run_all(self, *, seed, ticks=None) -> list[SensitivityResult]: ...
+```
+
+`SensitivityRunner` (Shell) прогоняет `HostLoop` при каждом значении ручки,
+ведя policy вручную (`select_action` + `record_policy` + `mark_spoke`, без LLM,
+ADR-0007), и берёт метрику из `BehavioralFingerprint`. Прогоны детерминированы
+(synthetic, fake embedder, детерминированный meter, фиксированный seed) →
+одинаковый seed даёт одинаковые отпечатки. Хардкодятся ручки и диапазоны;
+проверяются инварианты направления.
 
 ## Инварианты
 

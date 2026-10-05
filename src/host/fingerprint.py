@@ -60,6 +60,7 @@ class BehavioralFingerprint:
         talk_rate: Доля тиков с репликой, [0, 1].
         throttle_rate: Доля тиков под throttle, [0, 1].
         explore_rate: Доля тиков с policy-действием EXPLORE, [0, 1].
+        initiative_rate: Доля тиков с policy-действием INITIATIVE, [0, 1].
     """
 
     f_profile: FProfile
@@ -70,6 +71,7 @@ class BehavioralFingerprint:
     talk_rate: float
     throttle_rate: float
     explore_rate: float
+    initiative_rate: float
 
     def metric(self, name: str) -> float:
         """Значение именованной метрики отпечатка (для harness).
@@ -94,6 +96,7 @@ class BehavioralFingerprint:
             "talk_rate": self.talk_rate,
             "throttle_rate": self.throttle_rate,
             "explore_rate": self.explore_rate,
+            "initiative_rate": self.initiative_rate,
         }
         if name not in table:
             raise KeyError(f"unknown fingerprint metric {name!r}")
@@ -101,7 +104,7 @@ class BehavioralFingerprint:
 
 
 # Порядок метрик в расстоянии (детерминизм).
-_METRIC_NAMES: tuple[str, ...] = (
+FINGERPRINT_METRICS: tuple[str, ...] = (
     "f_mean",
     "f_std",
     "f_max",
@@ -112,6 +115,7 @@ _METRIC_NAMES: tuple[str, ...] = (
     "talk_rate",
     "throttle_rate",
     "explore_rate",
+    "initiative_rate",
 )
 
 
@@ -175,6 +179,10 @@ def behavioral_fingerprint(
             1 for event in events if event.get("policy_action", "") == "explore"
         )
         / len(events),
+        initiative_rate=sum(
+            1 for event in events if event.get("policy_action", "") == "initiative"
+        )
+        / len(events),
     )
 
 
@@ -192,7 +200,7 @@ def fingerprint_distance(a: BehavioralFingerprint, b: BehavioralFingerprint) -> 
         Среднее нормированное расстояние в [0, 1).
     """
     diffs = []
-    for name in _METRIC_NAMES:
+    for name in FINGERPRINT_METRICS:
         va = a.metric(name)
         vb = b.metric(name)
         diffs.append(abs(va - vb) / (1.0 + abs(va) + abs(vb)))

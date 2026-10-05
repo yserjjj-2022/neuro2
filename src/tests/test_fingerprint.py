@@ -120,6 +120,7 @@ class TestFingerprintDistance:
             talk_rate=0.0,
             throttle_rate=0.0,
             explore_rate=0.0,
+            initiative_rate=0.0,
         )
         assert fingerprint_distance(a, a) == pytest.approx(0.0)
 

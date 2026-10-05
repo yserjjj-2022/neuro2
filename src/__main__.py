@@ -201,7 +201,45 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Путь к TOML-override реестра интеграций (ADR-0011).",
     )
+    parser.add_argument(
+        "--sensitivity",
+        action="store_true",
+        help="Прогнать sensitivity-harness (матрица ручек → инварианты, S7-A).",
+    )
+    parser.add_argument(
+        "--sensitivity-ticks",
+        type=int,
+        default=120,
+        help="Тиков на прогон в sensitivity-harness. По умолчанию 120.",
+    )
     return parser.parse_args(argv)
+
+
+def _run_sensitivity(args: argparse.Namespace) -> int:
+    """Прогнать sensitivity-harness и напечатать матрицу (S7-A).
+
+    Args:
+        args: Аргументы CLI (sensitivity_ticks, seed).
+
+    Returns:
+        Код выхода: 0, если все инварианты выполнены, иначе 1.
+    """
+    from src.host.sensitivity import SensitivityRunner
+
+    runner = SensitivityRunner(ticks=args.sensitivity_ticks)
+    results = runner.run_all(seed=args.seed)
+    ok = True
+    for result in results:
+        case = result.case
+        values = ", ".join(f"{v:.4f}" for v in result.metric_values)
+        verdict = "OK" if result.passed else "FAIL"
+        ok = ok and result.passed
+        print(
+            f"[{verdict}] {case.knob} → {case.metric} "
+            f"({case.direction}): [{values}]"
+        )
+    print("sensitivity: all invariants hold" if ok else "sensitivity: FAILURES")
+    return 0 if ok else 1
 
 
 def _run_chat(
@@ -288,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parse_args(argv)
+    if args.sensitivity:
+        return _run_sensitivity(args)
     social = SocialConfig(enabled=not args.no_social)
     autonomy = AutonomyConfig(
         enabled=not args.no_autonomy,
