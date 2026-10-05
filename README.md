@@ -69,13 +69,15 @@ reasoning выключен — ADR-0007), история диалога, `--chat
 critical slowing down, протокол сброса), консолидация памяти (pruning + схемы,
 ночной цикл по расписанию), эпистемический драйв `Action.EXPLORE` (реальный
 эффектор: карта аффордансов + gated-зондирование), NumPy-факторизация
-(mode/partner/task), длинный горизонт C10. **S7 (HITL-диагностика)
-запланирован:** формальный sensitivity-harness (числа/ручки), пресеты
-(Python+TOML), диалоговая диагностика (пробы + ветвление по ответам),
-самоотчёт сброса (ADR-0010). **Реестр интеграций + MCP-транспорт реализован**
-(ADR-0011): каталог подключений (Python-база + TOML-override) + реальные
-MCP-серверы (stdio) вместо mock-зондирования, флаг `--integrations PATH`.
-819 тестов.
+(mode/partner/task), длинный горизонт C10. **S7 (HITL-диагностика) завершён:**
+формальный sensitivity-harness (`--sensitivity`, инварианты направления), пресеты
+(Python-база + TOML-override, `--preset`/`--preset-file`), диалоговая диагностика
+(дерево проб S3–S6 + ветвление, `--diagnose`), самоотчёт сброса через
+`CapabilityGate` (fail-safe deny); операторский протокол —
+`stages/S7_HITL_PROTOCOL.md` (ADR-0010). **Реестр интеграций + MCP-транспорт
+реализован** (ADR-0011): каталог подключений (Python-база + TOML-override) +
+реальные MCP-серверы (stdio) вместо mock-зондирования, флаг `--integrations PATH`.
+931 тестов.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
@@ -101,6 +103,19 @@ fake. Команды в чате: `/clear` (очистить историю), `/
 reasoning у модели (по умолчанию выкл); `--status` печатает состояние хоста
 (F, valence, stress, γ, задача, recall, дрейф) перед каждой репликой.
 Подробнее — [src/speech/README.md](src/speech/README.md).
+
+Диагностика (S7):
+
+```bash
+uv run python -m src --sensitivity                      # матрица ручек → инварианты
+uv run python -m src --preset dialogue --ticks 200      # именованный пресет
+uv run python -m src --diagnose --diagnose-log diag.jsonl   # дерево проб S3–S6
+```
+
+`--preset baseline|stress|dialogue|autonomy|long-horizon|cooperative` +
+`--preset-file configs/*.toml` (fail-fast override). `--diagnose` ведёт пробу →
+snapshot → категориальный вердикт → ветвление; `--probes FILE` переопределяет
+дерево. Операторский протокол — `stages/S7_HITL_PROTOCOL.md`.
 
 ## Лицензия
 

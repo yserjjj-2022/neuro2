@@ -261,14 +261,21 @@ SPEC/PLAN: `stages/S7_SPEC.md`, `stages/S7_PLAN.md`; протокол —
 `stages/S7_HITL_PROTOCOL.md`; решения — ADR-0010.
 
 **Критерии go:**
-- [ ] sensitivity-harness проверяет инварианты направления (pytest + CLI)
-- [ ] пресеты: Python-база + TOML-override (fail-fast)
-- [ ] диагностическая сессия: проба → snapshot → категориальный вердикт →
+- [x] sensitivity-harness проверяет инварианты направления (pytest + CLI)
+- [x] пресеты: Python-база + TOML-override (fail-fast)
+- [x] диагностическая сессия: проба → snapshot → категориальный вердикт →
       ветвление → журнал
-- [ ] дерево проб покрывает S3–S6; протокол пройден вручную
-- [ ] самоотчёт сброса + HITL-подтверждение (fail-safe deny)
+- [x] дерево проб покрывает S3–S6; протокол пройден вручную
+- [x] самоотчёт сброса + HITL-подтверждение (fail-safe deny)
 - [ ] каждая находка → машинный `SensitivityCase` или BACKLOG-задача
-- [ ] без флагов S7 контур S6 идентичен
+- [x] без флагов S7 контур S6 идентичен
+
+**Реализовано:** `src/host/fingerprint.py` (S7-A Core), `src/host/sensitivity.py`
+(harness, pytest + `--sensitivity`), `src/config/presets.py` + `configs/*.toml`
+(`--preset`/`--preset-file`), `src/host/diagnostic.py` + `src/host/probes.py`
+(`--diagnose`/`--probes`/`--diagnose-log`), `src/core/selfcontrol/report.py` +
+интент `report_reset` через `CapabilityGate`. Приёмка — ручной прогон
+`stages/S7_HITL_PROTOCOL.md`.
 
 ---
 
@@ -278,10 +285,14 @@ SPEC/PLAN: `stages/S7_SPEC.md`, `stages/S7_PLAN.md`; протокол —
 `--dt 0`, запись JSONL.
 
 **«Отпечаток» прогона:** компактная сводка метрик (F-профиль, число reflex,
-пики stress, доля активных каналов, ресурсные алярмы). Хранится как эталон.
+пики stress, доля активных каналов, ресурсные алярмы). Core-реализация —
+`src/host/fingerprint.py` (`behavioral_fingerprint` / `fingerprint_distance`),
+эталон в тестах. Хранится как эталон.
 
 **Правило:** при изменении кода отпечаток сравнивается с эталоном; различия
 классифицируются: ожидаемые (обновляем эталон осознанно) / регрессия (чиним).
+Чувствительность к ручкам фиксируется `src/host/sensitivity.py` (`--sensitivity`):
+матрица возмущений → инварианты направления.
 
 **Replay:** детерминизм (seed + инъекция часов) позволяет воспроизвести любой
 прогон, включая застрявшие сценарии.

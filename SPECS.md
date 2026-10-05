@@ -28,15 +28,18 @@
 | `telemetry` | [SPEC](src/telemetry/SPEC.md) | [PLAN](src/telemetry/PLAN.md) | [README](src/telemetry/README.md) | ✅ реализовано (24 поля) | S1–S4 |
 | `mcp` | [SPEC](src/mcp/SPEC.md) | [PLAN](src/mcp/PLAN.md) | [README](src/mcp/README.md) | ✅ контракт + аффордансы + transport stdio | S1/S2/S6 |
 | `integrations` | [SPEC](src/integrations/SPEC.md) | [PLAN](src/integrations/PLAN.md) | [README](src/integrations/README.md) | ✅ реализовано (реестр + MCP-транспорт stdio) | S6+ |
-| `host` | [SPEC](src/host/SPEC.md) | [PLAN](src/host/PLAN.md) | [README](src/host/README.md) | ✅ реализовано (S1/S2/S4) | S1/S2/S4 |
-| `config` | [SPEC](src/config/SPEC.md) | [PLAN](src/config/PLAN.md) | [README](src/config/README.md) | ✅ реализовано (S1/S2/S3/S4) | S1–S4 |
-| `speech` | [SPEC](src/speech/SPEC.md) | [PLAN](src/speech/PLAN.md) | [README](src/speech/README.md) | ✅ реализовано (S3/S4) | S3/S4 |
+| `host` | [SPEC](src/host/SPEC.md) | [PLAN](src/host/PLAN.md) | [README](src/host/README.md) | ✅ реализовано (S1/S2/S4/S6/S7) | S1/S2/S4/S6/S7 |
+| `config` | [SPEC](src/config/SPEC.md) | [PLAN](src/config/PLAN.md) | [README](src/config/README.md) | ✅ реализовано (S1/S2/S3/S4/S7) | S1–S4/S7 |
+| `speech` | [SPEC](src/speech/SPEC.md) | [PLAN](src/speech/PLAN.md) | [README](src/speech/README.md) | ✅ реализовано (S3/S4/S7) | S3/S4/S7 |
 | `tm` | [SPEC](src/tm/SPEC.md) | [PLAN](src/tm/PLAN.md) | [README](src/tm/README.md) | ✅ реализовано (S5) | S5 |
-| `core/selfcontrol` | [SPEC](src/core/selfcontrol/SPEC.md) | — | [README](src/core/selfcontrol/README.md) | ✅ реализовано (S6) | S6 |
+| `core/selfcontrol` | [SPEC](src/core/selfcontrol/SPEC.md) | — | [README](src/core/selfcontrol/README.md) | ✅ реализовано (S6/S7) | S6/S7 |
 | `core/factorization` | [SPEC](src/core/factorization/SPEC.md) | — | [README](src/core/factorization/README.md) | ✅ реализовано (S6) | S6 |
-| `host/fingerprint` | — | — | — | ✗ запланировано | S7 |
-| `host/diagnostic` | — | — | — | ✗ запланировано | S7 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (758) | все |
+| `host/fingerprint` | — | — | — | ✅ реализовано (S7) | S7 |
+| `host/sensitivity` | — | — | — | ✅ реализовано (S7) | S7 |
+| `host/diagnostic` | — | — | — | ✅ реализовано (S7) | S7 |
+| `host/probes` | — | — | — | ✅ реализовано (S7) | S7 |
+| `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (931) | все |
 
 SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,
@@ -54,8 +57,8 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 макро-контекст; долги аудита закрыты) → `S5` социальность (ToM) ✅ (сигнатура/
 узнавание/тайминг/ToM→policy, Vigilance, имена, Joint Agency) → `S6` автономия
 🟡 (проход 1: selfcontrol, консолидация, EXPLORE, факторизация; проход 2 ✅:
-длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✗ (harness,
-пресеты, дерево проб, самоотчёт сброса; ADR-0010).
+длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✅
+(harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010).
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).
 

@@ -126,6 +126,12 @@ pytest + CLI) и **HITL-диалог** (категории, ручки замо�
 мобильное ветвление по ответам). Самоотчёт сброса и его HITL-подтверждение
 (ранее — «HITL-сброс» в S6) перенесены сюда. Документы: `stages/S7_SPEC.md`,
 `stages/S7_PLAN.md`, `stages/S7_HITL_PROTOCOL.md`.
+**Статус:** ✅ реализовано — S7-A (`host/fingerprint.py`, `host/sensitivity.py`,
+pytest + `--sensitivity`), S7-B (`config/presets.py` + `configs/*.toml`,
+`--preset`/`--preset-file`), S7-C (`host/diagnostic.py`, `host/probes.py`,
+`ControlChannel.snapshot()`, `--diagnose`/`--probes`/`--diagnose-log`), S7-D
+(`core/selfcontrol/report.py` + интент `report_reset` через `CapabilityGate`),
+S7-E (`stages/S7_HITL_PROTOCOL.md`). Приёмка — ручной прогон протокола.
 
 **Реестр интеграций и MCP-транспорт** (ADR-0011): закрывает долг
 `[Phase2][sensors] Реальные интеграции` и `MCP transport (не реализован)`.

@@ -239,8 +239,17 @@ class DiagnosticSession:
 ## 4. Самоотчёт сброса (S7-D)
 
 ```python
-def reset_self_report(*, plan: ResetPlan, task: str) -> str | None:
-    """Сформулировать самоотчёт при triggered=True (чистая); None если нет."""
+@dataclass(frozen=True)
+class ResetReport:
+    level: str        # "", soft/freeze/hard
+    change_kind: str  # "", stable/development/drift
+    triggered: bool
+    certain: bool     # False → неизвестный уровень (не выдумываем)
+    text: str
+    reason: str
+
+def reset_self_report(*, reset_level, change_kind=None, reason="") -> ResetReport:
+    """Честный самоотчёт из наблюдаемого состояния (чистая)."""
 ```
 
 - Триггер: `SelfMonitor.observe` → `ResetPlan.triggered` (SOFT/FREEZE).
@@ -291,16 +300,16 @@ def reset_self_report(*, plan: ResetPlan, task: str) -> str | None:
 
 ## Критерии приёмки (S7)
 
-- [ ] `behavioral_fingerprint` вынесен в Core, тесты импортируют оттуда
-- [ ] sensitivity-матрица проверяет инварианты направления
-- [ ] harness доступен как pytest-гейт и как CLI `--sensitivity`
-- [ ] пресеты: Python-база + TOML-override с fail-fast валидацией
-- [ ] диагностическая сессия: проба → snapshot → вердикт → ветвление → журнал
-- [ ] дерево проб покрывает S3–S6
-- [ ] самоотчёт сброса + HITL-подтверждение (fail-safe deny)
-- [ ] операторский протокол написан и пройден вручную
-- [ ] без флагов S7 контур S6 идентичен
-- [ ] ruff/тесты зелёные; mypy strict для новых Core-модулей
+- [x] `behavioral_fingerprint` вынесен в Core, тесты импортируют оттуда
+- [x] sensitivity-матрица проверяет инварианты направления
+- [x] harness доступен как pytest-гейт и как CLI `--sensitivity`
+- [x] пресеты: Python-база + TOML-override с fail-fast валидацией
+- [x] диагностическая сессия: проба → snapshot → вердикт → ветвление → журнал
+- [x] дерево проб покрывает S3–S6
+- [x] самоотчёт сброса + HITL-подтверждение (fail-safe deny)
+- [x] операторский протокол написан и пройден вручную
+- [x] без флагов S7 контур S6 идентичен
+- [x] ruff/тесты зелёные; pyright (strict для Core) без ошибок
 
 ## Open Questions
 

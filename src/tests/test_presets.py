@@ -132,3 +132,25 @@ class TestShippedOverrides:
         config = load_preset("stress", override=path)
         assert config.homeostasis.escape_hatch_ticks == 1
         assert config.policy.preferences.silent_stress_gain == 0.1
+
+
+class TestS7Compat:
+    """Без флагов S7 CLI-путь конфигурации не меняется (обратная совместимость)."""
+
+    def test_no_preset_uses_cli_defaults(self) -> None:
+        from src.__main__ import _build_config, _parse_args
+        from src.config import AutonomyConfig, SocialConfig
+
+        args = _parse_args([])
+        config = _build_config(
+            args, SocialConfig(enabled=True), AutonomyConfig(enabled=True)
+        )
+        assert config.speech.enabled is False
+        assert config.policy.enabled is True
+        assert config.memory.enabled is True
+        assert config.social.enabled is True
+        assert config.autonomy.enabled is True
+        # Пресет не активируется по умолчанию.
+        assert args.preset is None
+        assert args.sensitivity is False
+        assert args.diagnose is False
