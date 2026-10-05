@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.host.diagnostic import DiagnosticSnapshot, take_snapshot
 from src.host.loop import HostLoop
 from src.speech.status import format_status
 
@@ -63,6 +64,18 @@ class ControlChannel:
     def resume(self) -> None:
         """Возобновить тики после паузы."""
         self.paused = False
+
+    def snapshot(self) -> DiagnosticSnapshot:
+        """Полный числовой снимок состояния для диагностики (S7-C).
+
+        Собирает F/валентность/стресс/γ, активную задачу, ToM и метакогницию,
+        уровень сброса и классификацию изменения. Снимок привязан к вердикту
+        (ADR-0010 §5) и не оценивается наблюдателем вручную.
+
+        Returns:
+            DiagnosticSnapshot текущего состояния loop.
+        """
+        return take_snapshot(self.loop)
 
     def step(self, n: int = 1) -> int:
         """Сделать ровно n тиков (пошаговое наблюдение рефлекса).

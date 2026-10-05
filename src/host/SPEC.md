@@ -339,6 +339,47 @@ ADR-0007), и берёт метрику из `BehavioralFingerprint`. Прого
 одинаковый seed даёт одинаковые отпечатки. Хардкодятся ручки и диапазоны;
 проверяются инварианты направления.
 
+## Diagnostic session (diagnostic.py, probes.py, S7-C)
+
+Диагностическая сессия (ADR-0010 §5): проба → числовой снимок → категориальный
+вердикт → ветвление → журнал. **Ручки заморожены пресетом** (сессия не меняет
+конфиг), вердикт — категория (не число), снимок привязан к вердикту и не
+оценивается человеком. I/O инъектируется (`input_fn`/`output_fn`), журнал —
+JSONL.
+
+```python
+class Verdict(Enum): MATCHES = "matches"; PARTIAL = "partial"; MISMATCH = "mismatch"
+def parse_verdict(text) -> Verdict: ...
+def next_probe(probe, verdict) -> str | None: ...
+
+@dataclass(frozen=True)
+class ProbeSetup: seed: int; ticks: int; messages: tuple[tuple[int, str], ...]
+@dataclass(frozen=True)
+class Probe: id; stage; preset; setup; question; branches; fallback
+@dataclass(frozen=True)
+class DiagnosticSnapshot: tick; f; valence; stress; gamma; task;
+    partner_trust; partner_uncertainty; metacog_conflict; reset_level; change_kind
+@dataclass(frozen=True)
+class ProbeResult: probe_id; verdict; comment; snapshot; next_probe
+
+def take_snapshot(loop) -> DiagnosticSnapshot: ...
+
+class DiagnosticSession:
+    def __init__(self, *, probes, input_fn=input, output_fn=print,
+                 journal_path=None, workdir=Path(".diagnostic"),
+                 loop_factory=...) -> None: ...
+    def snapshot(self) -> DiagnosticSnapshot: ...
+    def run_probe(self, probe) -> ProbeResult: ...
+    def run(self, *, start, max_probes=0) -> list[ProbeResult]: ...
+```
+
+`probes.py` — реестр `id → Probe`: встроенное дерево S3–S6 с ветвлениями и
+fallback (`default_probes`/`default_start`) и JSON-загрузчик (`load_probes`).
+Порядок проб — по возрастанию стоимости (сначала дешёвые tone/attention).
+`ControlChannel.snapshot()` переиспользует `take_snapshot` (единый источник
+снимка). CLI: `--diagnose [--probes FILE] [--diagnose-start ID]
+[--diagnose-log PATH]`.
+
 ## Инварианты
 
 1. `dt > 0`; decay/интегралы в секундах.

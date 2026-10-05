@@ -13,6 +13,9 @@
   `fingerprint_distance` (числовой отпечаток прогона, S7-A).
 - `sensitivity.py` — `SensitivityCase`/`build_sensitivity_matrix`/
   `check_direction` + `SensitivityRunner` (harness чувствительности, S7-A).
+- `diagnostic.py` — `Verdict`/`Probe`/`ProbeResult`/`DiagnosticSnapshot`/
+  `next_probe`/`take_snapshot` + `DiagnosticSession` (движок диагностики, S7-C).
+- `probes.py` — встроенное дерево проб S3–S6 + JSON-загрузчик (S7-C).
 - `loop.py` — `HostLoop`: время (synthetic/wall, time_scale), precision,
   гомеостаз, throttle, attention-барьер, ресурсы, guard, drift, память
   (recall→приор, запись), policy-контекст, телеметрия.

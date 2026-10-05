@@ -462,6 +462,46 @@ class HostLoop:
         self._spoke_pending = True
 
     @property
+    def current_tick(self) -> int:
+        """Номер последнего выполненного тика (для диагностического снимка)."""
+        return self._current_tick
+
+    @property
+    def last_reset_level(self) -> str:
+        """Уровень сброса последнего тика ("", soft/freeze/hard) — S6."""
+        return self._reset_level_pending
+
+    @property
+    def last_change_kind(self) -> str:
+        """Классификация изменения последнего тика (S6)."""
+        return self._change_kind_pending
+
+    @property
+    def last_partner_trust(self) -> float:
+        """Доверие к партнёру, зафиксированное для следующего тика (S5)."""
+        return self._partner_trust_pending
+
+    @property
+    def last_partner_uncertainty(self) -> float:
+        """Неопределённость идентичности партнёра (S5)."""
+        return self._partner_uncertainty_pending
+
+    @property
+    def last_metacog_conflict(self) -> float:
+        """Несогласие ансамбля колонок последнего тика (S6)."""
+        return self._metacog_conflict_pending
+
+    @property
+    def last_metacog_metastability(self) -> float:
+        """Метастабильность аттрактора последнего тика (S6)."""
+        return self._metacog_metastability_pending
+
+    @property
+    def last_metacog_saturation(self) -> float:
+        """Насыщение/тренд F последнего тика (S6)."""
+        return self._metacog_saturation_pending
+
+    @property
     def escape_hatch_active(self) -> bool:
         """Разрешён ли escape hatch: throttle удерживается ≥ порога тиков.
 

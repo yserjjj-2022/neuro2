@@ -185,7 +185,7 @@ def check_direction(
     return all(0.0 <= v <= 1.0 for v in metric_values)
 
 
-class _DeterministicMeter(ResourceMeter):
+class DeterministicMeter(ResourceMeter):
     """Детерминированный ресурсный meter для воспроизводимых прогонов."""
 
     def __init__(self, latency_s: float = 0.0005, rss_mb: float = 100.0) -> None:
@@ -323,7 +323,7 @@ class SensitivityRunner:
     @staticmethod
     def _run_loop(config: HostConfig, *, ticks: int) -> BehavioralFingerprint:
         """Прогнать loop, ведя policy вручную, и вернуть отпечаток."""
-        loop = build_host_loop(config, meter=_DeterministicMeter())
+        loop = build_host_loop(config, meter=DeterministicMeter())
         try:
             for tick in range(ticks):
                 loop.step_once(tick)

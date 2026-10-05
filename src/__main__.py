@@ -227,6 +227,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=120,
         help="Тиков на прогон в sensitivity-harness. По умолчанию 120.",
     )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="Запустить диагностическую сессию (дерево проб, S7-C).",
+    )
+    parser.add_argument(
+        "--probes",
+        type=Path,
+        default=None,
+        help="JSON-файл дерева проб (None → встроенное дерево S3–S6).",
+    )
+    parser.add_argument(
+        "--diagnose-start",
+        type=str,
+        default=None,
+        help="id стартовой пробы (None → старт по умолчанию).",
+    )
+    parser.add_argument(
+        "--diagnose-log",
+        type=Path,
+        default=Path("diagnostic.jsonl"),
+        help="JSONL-журнал вердиктов диагностики.",
+    )
     return parser.parse_args(argv)
 
 
@@ -255,6 +278,33 @@ def _run_sensitivity(args: argparse.Namespace) -> int:
         )
     print("sensitivity: all invariants hold" if ok else "sensitivity: FAILURES")
     return 0 if ok else 1
+
+
+def _run_diagnose(args: argparse.Namespace) -> int:
+    """Запустить диагностическую сессию и напечатать вердикты (S7-C).
+
+    Args:
+        args: Аргументы CLI (probes, diagnose_start, diagnose_log).
+
+    Returns:
+        Код выхода (0 — успех).
+    """
+    from src.host.diagnostic import DiagnosticSession
+    from src.host.probes import default_probes, default_start, load_probes
+
+    probes = load_probes(args.probes) if args.probes else default_probes()
+    if args.diagnose_start is not None:
+        start = args.diagnose_start
+    elif args.probes is None:
+        start = default_start()
+    else:
+        start = next(iter(probes))
+    session = DiagnosticSession(probes=probes, journal_path=args.diagnose_log)
+    results = session.run(start=start)
+    for result in results:
+        print(f"[{result.probe_id}] {result.verdict.value} → next={result.next_probe}")
+    print(f"diagnose: {len(results)} probes, journal={args.diagnose_log}")
+    return 0
 
 
 def _run_chat(
@@ -411,6 +461,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.sensitivity:
         return _run_sensitivity(args)
+    if args.diagnose:
+        return _run_diagnose(args)
     social = SocialConfig(enabled=not args.no_social)
     autonomy = AutonomyConfig(
         enabled=not args.no_autonomy,
