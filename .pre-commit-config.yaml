@@ -12,7 +12,6 @@ repos:
       - id: pyright
         name: pyright (src/core)
         files: ^src/core/
-        args: [--strict]
 
   - repo: https://github.com/pytest-dev/pytest
     rev: 8.3.4

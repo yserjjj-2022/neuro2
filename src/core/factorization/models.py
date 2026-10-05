@@ -14,8 +14,6 @@ import numpy as np
 
 Vector = np.ndarray[Any, np.dtype[np.floating[Any]]]
 
-_EPS = 1e-12
-
 
 @dataclass(frozen=True)
 class Factor:
@@ -76,10 +74,3 @@ class FactorizedState:
         if len(set(names)) != len(names):
             raise ValueError(f"factor names must be unique, got {names}")
 
-
-def _normalize(vec: Vector) -> Vector:
-    """Нормировать вектор в распределение (равномерное при нулевой сумме)."""
-    total = float(np.sum(vec))
-    if total <= _EPS:
-        return np.full(vec.shape, 1.0 / vec.shape[0], dtype=np.float64)
-    return np.asarray(vec, dtype=np.float64) / total

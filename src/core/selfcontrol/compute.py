@@ -31,14 +31,6 @@ def _clip01(value: float) -> float:
     return float(min(1.0, max(0.0, value)))
 
 
-def _sigmoid(x: float) -> float:
-    """Логистическая функция (устойчивая к переполнению)."""
-    if x >= 0.0:
-        return 1.0 / (1.0 + math.exp(-x))
-    exp_x = math.exp(x)
-    return exp_x / (1.0 + exp_x)
-
-
 def compute_conflict(scores: Vector | Sequence[float]) -> float:
     """Несогласие ансамбля: нормированный разброс активностей, [0, 1].
 

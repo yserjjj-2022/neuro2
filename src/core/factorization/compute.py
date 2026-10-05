@@ -11,7 +11,17 @@ from dataclasses import replace
 
 import numpy as np
 
-from .models import Factor, FactorizedState, Vector, _normalize
+from .models import Factor, FactorizedState, Vector
+
+_EPS = 1e-12
+
+
+def _normalize(vec: Vector) -> Vector:
+    """Нормировать вектор в распределение (равномерное при нулевой сумме)."""
+    total = float(np.sum(vec))
+    if total <= _EPS:
+        return np.full(vec.shape, 1.0 / vec.shape[0], dtype=np.float64)
+    return np.asarray(vec, dtype=np.float64) / total
 
 
 def posterior(factor: Factor) -> Vector:
