@@ -9,6 +9,7 @@ Re-exports:
     CriticalSlowingDown — early-warning signal (variance + autocorrelation)
     ChangeKind, ChangeAssessment — development vs drift classification
     ResetLevel, ResetPlan — reset protocol (soft/freeze/hard)
+    ResetReport, reset_self_report — honest self-report of a reset (S7)
     SelfMonitor — imperative shell over the pure core
     compute_conflict, compute_metastability, compute_saturation — observables
     critical_slowing_down — pure early-warning estimator
@@ -33,6 +34,7 @@ from src.core.selfcontrol.models import (
     ResetPlan,
 )
 from src.core.selfcontrol.monitor import SelfMonitor
+from src.core.selfcontrol.report import ResetReport, reset_self_report
 
 __all__ = [
     "ChangeAssessment",
@@ -41,6 +43,7 @@ __all__ = [
     "Metacognition",
     "ResetLevel",
     "ResetPlan",
+    "ResetReport",
     "SelfMonitor",
     "classify_change",
     "compute_conflict",
@@ -48,4 +51,5 @@ __all__ = [
     "compute_saturation",
     "critical_slowing_down",
     "plan_reset",
+    "reset_self_report",
 ]

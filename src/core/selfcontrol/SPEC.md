@@ -81,6 +81,28 @@ class SelfMonitor:
   (catastrophic drift). Core не сбрасывается.
 - **Read-only:** наблюдаемые влияют на следующий тик/ход, не на F того же.
 
+## Самоотчёт сброса (S7-D)
+
+`report.py` — чистый Core: наблюдаемый сброс → структурированный честный отчёт.
+
+```python
+@dataclass(frozen=True)
+class ResetReport:
+    level: str        # "", soft/freeze/hard
+    change_kind: str  # "", stable/development/drift
+    triggered: bool
+    certain: bool     # False → неизвестный уровень (не выдумываем)
+    text: str
+    reason: str
+
+def reset_self_report(*, reset_level, change_kind=None, reason="") -> ResetReport: ...
+```
+
+Правила честности: сброса не было → явно сказать; известный уровень → описание
+уровня + классификация изменения; неизвестный уровень → `certain=False`
+(детали не фабрикуются). Речевой интент `report_reset` и исполнение через
+`CapabilityGate` — в `src/speech`.
+
 ## Инварианты
 
 1. Все наблюдаемые ∈ [0, 1]; валидация в `__post_init__`.

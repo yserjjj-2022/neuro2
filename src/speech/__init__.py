@@ -21,6 +21,7 @@ from .intent import (
     describe_affect,
     register_max_tokens,
     render_messages,
+    report_reset_intent,
 )
 from .llm import (
     DEFAULT_MODEL,
@@ -52,5 +53,6 @@ __all__ = [
     "llm_settings_from_env",
     "register_max_tokens",
     "render_messages",
+    "report_reset_intent",
     "should_speak",
 ]

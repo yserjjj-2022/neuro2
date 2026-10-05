@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from src.config import PolicyConfig
 from src.core.policy import Action, PartnerView, select_action
+from src.core.selfcontrol import reset_self_report
 from src.host.gate import (
     ActionRequest,
     Capability,
@@ -25,7 +26,7 @@ from src.host.gate import (
 from src.host.loop import HostLoop
 from src.speech.controller import SpeechController
 from src.speech.history import ConversationHistory
-from src.speech.intent import escape_hatch_message
+from src.speech.intent import escape_hatch_message, report_reset_intent
 from src.speech.status import format_status
 from src.tm import JointAgency, PartnerModel, VigilanceGate
 
@@ -183,6 +184,31 @@ class ChatSession:
             self.loop.mark_spoke()
             self.history.add_assistant(hatch_reply)
             self.output_fn(hatch_reply)
+            return True
+
+        # Самоотчёт сброса (S7-D): оператор спрашивает о сбросе/состоянии —
+        # хост честно описывает наблюдаемый сброс (Core reset_self_report).
+        # Исполнение — только через CapabilityGate (fail-safe deny).
+        if report_reset_intent(user_input):
+            report = reset_self_report(
+                reset_level=self.loop.last_reset_level,
+                change_kind=self.loop.last_change_kind,
+            )
+            decision = self.gate.request(
+                ActionRequest(
+                    name="report_reset",
+                    tier=CapabilityTier.T1,
+                    reversible=True,
+                    reason="report_reset",
+                    capabilities=frozenset({Capability.SPEAK}),
+                )
+            )
+            if not decision.allowed:
+                self.output_fn("[хост промолчал]")
+                return True
+            self.loop.mark_spoke()
+            self.history.add_assistant(report.text)
+            self.output_fn(report.text)
             return True
 
         goal, allow_speak = self._decide_goal(

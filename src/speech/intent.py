@@ -253,3 +253,27 @@ def render_messages(
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
     return messages
+
+
+# Триггеры запроса самоотчёта о сбросе (S7-D). Подстроки, регистронезависимо.
+_RESET_REPORT_TRIGGERS: tuple[str, ...] = (
+    "сброс",
+    "сбрасыв",
+    "что с тобой",
+    "что случилось",
+    "report reset",
+    "reset report",
+)
+
+
+def report_reset_intent(user_text: str) -> bool:
+    """Распознать запрос оператора о самоотчёте сброса (чистая, S7-D).
+
+    Args:
+        user_text: Реплика оператора.
+
+    Returns:
+        True, если оператор просит рассказать о сбросе/состоянии.
+    """
+    low = user_text.lower()
+    return any(trigger in low for trigger in _RESET_REPORT_TRIGGERS)

@@ -190,6 +190,16 @@ system-промпт (`IntentFrame.partner_name`). `JointAgency` (режим
 Нужна для HITL-валидации ворот S3 («тон следует аффекту»). Полноценная
 панель (графики, pause/step/inject) — S4 (control channel).
 
+## Самоотчёт сброса (S7-D)
+
+`report_reset_intent(user_text)` (Core, `intent.py`) распознаёт запрос оператора
+о сбросе/состоянии (подстроки: «сброс», «сбрасыв», «что с тобой», «что
+случилось», «report reset»). При срабатывании `ChatSession` строит отчёт
+`reset_self_report(...)` из наблюдаемого состояния loop (`last_reset_level`,
+`last_change_kind`) и **исполняет речь только через `CapabilityGate`**
+(`name="report_reset"`, tier T1, reversible, capability `SPEAK`). Отказ gate →
+`[хост промолчал]` (fail-safe deny, без обхода).
+
 ## Инварианты
 
 1. Речь не роняет контур: ошибки LLM/recall → `None`/лог.
