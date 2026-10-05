@@ -10,7 +10,6 @@ summary used for regression comparison across code changes.
 
 from __future__ import annotations
 
-import itertools
 import json
 from pathlib import Path
 
@@ -20,6 +19,7 @@ import pytest
 from src.config import HostConfig, MemoryConfig
 from src.core.cmc import ColumnConfig
 from src.core.energy import DriftDetector, PrecisionEstimator
+from src.host.fingerprint import regression_fingerprint as behavioral_fingerprint
 from src.host.loop import HostLoop, build_host_loop
 from src.host.resources import ResourceMeter
 from src.host.sources import (
@@ -31,58 +31,6 @@ from src.host.sources import (
 )
 from src.host.wiring import build_cmc_pipeline
 from src.telemetry import TelemetryLogger, TelemetryWriter
-
-
-def behavioral_fingerprint(
-    events: list[dict],
-    valence_significance: float = 1.0,
-) -> dict[str, float]:
-    """Компактная сводка прогона для регресса (VALIDATION.md §5).
-
-    Чистая функция: не мутирует events.
-
-    Args:
-        events: Список событий телеметрии (dict из JSONL).
-        valence_significance: Порог |valence|, ниже которого колебания
-            считаются микро-шумом у нуля (не «сменой настроения»).
-
-    Returns:
-        Словарь метрик: профиль F, стресс, valence, reflex, drift, latency.
-    """
-    if not events:
-        raise ValueError("events must not be empty")
-
-    f_values = [e["free_energy"] for e in events]
-    stress_values = [e["allostatic_stress"] for e in events]
-    valence_values = [e["valence"] for e in events]
-    latency_values = [e["latency_ms"] for e in events]
-
-    # Значимые смены знака — только среди |valence| > порога
-    significant = [v for v in valence_values if abs(v) > valence_significance]
-    sign_changes = sum(
-        1 for a, b in itertools.pairwise(significant) if (a > 0) != (b > 0)
-    )
-    reflex_events = sum(1 for e in events if e["reflex_tags"])
-
-    return {
-        "n_events": float(len(events)),
-        "f_min": float(min(f_values)),
-        "f_max": float(max(f_values)),
-        "f_final": float(f_values[-1]),
-        "stress_max": float(max(stress_values)),
-        "stress_final": float(stress_values[-1]),
-        "valence_sign_changes": float(sign_changes),
-        "reflex_events": float(reflex_events),
-        "drift_events": float(sum(1 for e in events if e["drift"])),
-        "memory_hits": float(sum(1 for e in events if e.get("memory_hit"))),
-        "episodes_stored": float(sum(1 for e in events if e.get("episode_stored"))),
-        "throttle_events": float(sum(1 for e in events if e.get("throttle"))),
-        "policy_events": float(
-            sum(1 for e in events if e.get("policy_action", "") != "")
-        ),
-        "latency_p50_ms": float(np.percentile(latency_values, 50)),
-        "latency_p95_ms": float(np.percentile(latency_values, 95)),
-    }
 
 
 class FakeMeter(ResourceMeter):

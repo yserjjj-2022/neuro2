@@ -265,6 +265,46 @@ class ControlChannel:
 наблюдение рефлекса); `status` переиспользует `format_status`. Расширение
 (inject/set/snapshot/restore/freeze/kill) — позже.
 
+## Fingerprint (fingerprint.py, S7-A)
+
+Компактный числовой отпечаток прогона (VALIDATION §5), вынесенный в Core из
+тестов (ADR-0010 §3, §7). Вход — строки телеметрии (`Mapping[str, Any]`, как в
+JSONL), что делает отпечаток независимым от dataclass и удобным для replay.
+
+```python
+@dataclass(frozen=True)
+class FProfile:
+    mean: float
+    std: float
+    max: float
+
+
+@dataclass(frozen=True)
+class BehavioralFingerprint:
+    f_profile: FProfile
+    reflex_count: int
+    stress_peaks: float
+    active_fraction: float   # доля тиков с активной колонкой, [0, 1]
+    resource_alarms: int
+    talk_rate: float         # доля тиков с репликой, [0, 1]
+    throttle_rate: float
+    explore_rate: float
+
+    def metric(self, name: str) -> float: ...
+
+
+def behavioral_fingerprint(events) -> BehavioralFingerprint: ...
+def fingerprint_distance(a, b) -> float: ...
+def regression_fingerprint(events, valence_significance=1.0) -> dict[str, float]: ...
+```
+
+`behavioral_fingerprint` (чистая) собирает отпечаток; пустой вход или
+отсутствие обязательного поля → `ValueError`. `fingerprint_distance` (чистая) —
+среднее нормированное расстояние в [0, 1): 0 при равенстве, симметрично.
+`regression_fingerprint` — историческая подробная сводка поведенческого
+регресса, перенесена из тестов без изменения поведения (тест-хелпер
+реэкспортирует её под прежним именем).
+
 ## Инварианты
 
 1. `dt > 0`; decay/интегралы в секундах.
