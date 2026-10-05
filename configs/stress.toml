@@ -1,0 +1,10 @@
+# Example TOML override for the "stress" preset (S7-B).
+# python -m src --preset stress --preset-file configs/stress.toml
+
+[homeostasis]
+reflex_threshold = 0.5
+escape_hatch_ticks = 1
+
+[policy.preferences]
+alert_deviation = 0.4
+silent_stress_gain = 0.1

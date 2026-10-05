@@ -141,6 +141,36 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `explore_threshold` | 0.6 | Порог неопределённости для EXPLORE |
 | `factor_learning_rate` | 0.3 | Скорость обновления факторов |
 
+## Пресеты (S7-B)
+
+```python
+def baseline() -> HostConfig: ...
+def stress() -> HostConfig: ...
+def dialogue() -> HostConfig: ...
+def autonomy() -> HostConfig: ...
+def long_horizon() -> HostConfig: ...
+def cooperative() -> HostConfig: ...
+
+def load_preset(name: str, *, override: Path | None = None) -> HostConfig: ...
+def available_presets() -> tuple[str, ...]: ...
+```
+
+Python-база (типобезопасные фабрики) + TOML-override (stdlib `tomllib`).
+Инварианты базы: `clock_mode="synthetic"`, `llm_mode="fake"`,
+`embedder_mode="fake"`, фиксированный `seed` → воспроизводимость отпечатков.
+Override — частичная перезапись полей/секций; неизвестный ключ, секция не на
+dataclass или недопустимое значение → `ValueError` (fail-fast, до прогона).
+CLI: `--preset NAME [--preset-file PATH]`.
+
+| Пресет | Что включает |
+|---|---|
+| `baseline` | всё дефолтное, детерминизм (эталон отпечатка) |
+| `stress` | низкие сетпоинты, частый рефлекс, короткий escape hatch |
+| `dialogue` | speech+memory+policy+social (fake) |
+| `autonomy` | autonomy+selfcontrol+ночная консолидация |
+| `long-horizon` | большой `max_ticks`, synthetic (C10) |
+| `cooperative` | `mode="cooperative"` + ToM |
+
 ## Инварианты
 
 1. Валидация fail-fast: `k<1`, `dt<=0`,

@@ -1,0 +1,14 @@
+# Example TOML override for the "dialogue" preset (S7-B).
+# Layer on top of the Python base: python -m src --chat --preset dialogue \
+#   --preset-file configs/dialogue.toml
+# Unknown keys or invalid values fail fast before the run (ADR-0010 §6).
+
+[speech]
+f_threshold = 0.25
+default_register = "normal"
+
+[memory]
+recall_limit = 2
+
+[policy.preferences]
+alert_deviation = 0.5

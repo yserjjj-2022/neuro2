@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import logging
 import signal
+from dataclasses import replace
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,6 +21,7 @@ from src.config import (
     PolicyConfig,
     SocialConfig,
     SpeechConfig,
+    load_preset,
 )
 from src.host.loop import HostLoop, build_host_loop
 from src.integrations import load_integrations
@@ -202,6 +204,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Путь к TOML-override реестра интеграций (ADR-0011).",
     )
     parser.add_argument(
+        "--preset",
+        type=str,
+        default=None,
+        help="Именованный пресет конфигурации (S7-B): baseline/stress/dialogue/"
+        "autonomy/long-horizon/cooperative.",
+    )
+    parser.add_argument(
+        "--preset-file",
+        type=Path,
+        default=None,
+        help="TOML-override поверх пресета (S7-B).",
+    )
+    parser.add_argument(
         "--sensitivity",
         action="store_true",
         help="Прогнать sensitivity-harness (матрица ручек → инварианты, S7-A).",
@@ -311,6 +326,74 @@ def _run_chat(
     return 0
 
 
+def _build_config(
+    args: argparse.Namespace, social: SocialConfig, autonomy: AutonomyConfig
+) -> HostConfig:
+    """Собрать HostConfig из CLI-флагов или именованного пресета (S7-B).
+
+    При ``--preset`` база берётся из пресета, а поверх применяются только
+    операционные CLI-переопределения (dt/ticks/seed/log/db) и выключатели
+    (--no-policy/--no-social/--no-autonomy/--chat). Пресет фиксирует
+    детерминизм (synthetic, fake LLM/embedder) — он не переопределяется.
+
+    Args:
+        args: Аргументы CLI.
+        social: Социальный конфиг из CLI-флагов.
+        autonomy: Конфиг автономии из CLI-флагов.
+
+    Returns:
+        Готовый HostConfig.
+    """
+    if args.preset is not None:
+        config = load_preset(args.preset, override=args.preset_file)
+        return replace(
+            config,
+            dt=args.dt,
+            max_ticks=args.ticks,
+            seed=args.seed,
+            log_path=str(args.log),
+            memory=replace(config.memory, db_path=str(args.db)),
+            speech=replace(config.speech, enabled=config.speech.enabled or args.chat),
+            policy=replace(
+                config.policy, enabled=config.policy.enabled and not args.no_policy
+            ),
+            social=replace(
+                config.social, enabled=config.social.enabled and not args.no_social
+            ),
+            autonomy=replace(
+                config.autonomy,
+                enabled=config.autonomy.enabled and not args.no_autonomy,
+                consolidate_every_ticks=args.night_every,
+                consolidate_min_episodes=args.night_min_episodes,
+            ),
+        )
+    return HostConfig(
+        dt=args.dt,
+        max_ticks=args.ticks,
+        k=args.k,
+        seed=args.seed,
+        precision_mode=args.precision,
+        clock_mode=args.clock_mode,
+        paced=args.paced,
+        log_path=str(args.log),
+        memory=MemoryConfig(
+            enabled=not args.no_memory,
+            embedder_mode=args.embedder,
+            db_path=str(args.db),
+        ),
+        speech=SpeechConfig(
+            enabled=args.chat,
+            llm_mode=args.llm,
+            default_register=args.register,
+            f_threshold=args.f_threshold,
+            history_turns=args.history_turns,
+        ),
+        policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
+        social=social,
+        autonomy=autonomy,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собрать loop, гнать тики, корректно завершиться.
 
@@ -349,31 +432,7 @@ def main(argv: list[str] | None = None) -> int:
             probe_affordances = probe_fn.affordances()
 
     loop: HostLoop = build_host_loop(
-        HostConfig(
-            dt=args.dt,
-            max_ticks=args.ticks,
-            k=args.k,
-            seed=args.seed,
-            precision_mode=args.precision,
-            clock_mode=args.clock_mode,
-            paced=args.paced,
-            log_path=str(args.log),
-            memory=MemoryConfig(
-                enabled=not args.no_memory,
-                embedder_mode=args.embedder,
-                db_path=str(args.db),
-            ),
-            speech=SpeechConfig(
-                enabled=args.chat,
-                llm_mode=args.llm,
-                default_register=args.register,
-                f_threshold=args.f_threshold,
-                history_turns=args.history_turns,
-            ),
-            policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
-            social=social,
-            autonomy=autonomy,
-        ),
+        _build_config(args, social, autonomy),
         integrations=integrations,
         probe_fn=probe_fn,
         affordances=probe_affordances,
