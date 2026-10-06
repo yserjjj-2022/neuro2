@@ -32,3 +32,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Real personal study data — NEVER commit (privacy)
+data/style_study/
+reports/
