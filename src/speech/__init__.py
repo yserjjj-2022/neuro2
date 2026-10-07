@@ -15,10 +15,11 @@ from .chat import ChatSession
 from .controller import SpeechController, SpeechDecision, should_speak
 from .history import ConversationHistory
 from .intent import (
-    REGISTER_MAX_TOKENS,
+    GOAL_INSTRUCTIONS,
     IntentFrame,
     build_intent_frame,
-    describe_affect,
+    goal_for_action,
+    goal_instruction,
     register_max_tokens,
     render_messages,
     report_reset_intent,
@@ -36,6 +37,7 @@ from .status import format_status
 
 __all__ = [
     "DEFAULT_MODEL",
+    "GOAL_INSTRUCTIONS",
     "REGISTER_MAX_TOKENS",
     "ApiLlmClient",
     "ChatSession",
@@ -50,6 +52,8 @@ __all__ = [
     "build_llm_client",
     "describe_affect",
     "format_status",
+    "goal_for_action",
+    "goal_instruction",
     "llm_settings_from_env",
     "register_max_tokens",
     "render_messages",

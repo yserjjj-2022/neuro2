@@ -35,6 +35,9 @@ class MemoryConfig:
         episode_spike_threshold: Порог всплеска F для записи эпизода.
         recall_limit: Сколько эпизодов извлекать при recall.
         prior_dim: Размерность приора памяти в шине.
+        recall_enabled: Включать ли recall (содержимое воспоминаний). False →
+            prior-канал присутствует, но всегда нулевой (чистый ablation
+            содержания: провайдер и размерность не меняются).
     """
 
     enabled: bool = True
@@ -44,6 +47,7 @@ class MemoryConfig:
     episode_spike_threshold: float = 1.0
     recall_limit: int = 1
     prior_dim: int = 4
+    recall_enabled: bool = True
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известный режим, пороги."""

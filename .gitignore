@@ -27,6 +27,7 @@ Thumbs.db
 *.db-wal
 *.db-shm
 .host_clock
+.diagnostic/
 
 # Secrets — never commit real credentials
 .env

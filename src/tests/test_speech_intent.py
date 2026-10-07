@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from src.core.policy import Action
 from src.speech.intent import (
     GOAL_INSTRUCTIONS,
     REGISTER_MAX_TOKENS,
     build_intent_frame,
     describe_affect,
     escape_hatch_message,
+    goal_for_action,
     goal_instruction,
     register_max_tokens,
     render_messages,
@@ -130,7 +132,13 @@ class TestGoalGrounding:
     """Grounding: goal → явная инструкция+scope в system-промпте (S4-долг)."""
 
     def test_all_goals_have_instruction(self) -> None:
-        for goal in ("respond", "initiative", "identify_partner", "silent"):
+        for goal in (
+            "respond",
+            "initiative",
+            "identify_partner",
+            "explore",
+            "silent",
+        ):
             assert goal in GOAL_INSTRUCTIONS
             assert GOAL_INSTRUCTIONS[goal] != ""
 
@@ -155,6 +163,28 @@ class TestGoalGrounding:
             render_messages(respond, "x")[0]["content"]
             != render_messages(initiative, "x")[0]["content"]
         )
+
+
+class TestActionToGoal:
+    """Полный маппинг Action → goal (S4-долг, звено 3)."""
+
+    def test_every_action_maps_to_goal(self) -> None:
+        for action in Action:
+            goal = goal_for_action(action)
+            assert goal in GOAL_INSTRUCTIONS
+
+    def test_explore_maps_to_explore_not_respond(self) -> None:
+        """EXPLORE раньше проваливался в respond — теперь своя цель."""
+        assert goal_for_action(Action.EXPLORE) == "explore"
+        assert goal_for_action(Action.EXPLORE) != "respond"
+
+    def test_silent_maps_to_silent(self) -> None:
+        assert goal_for_action(Action.SILENT) == "silent"
+
+    def test_goals_match_instruction_keys(self) -> None:
+        """Маппинг и инструкции не рассинхронизированы (нет «висячих» целей)."""
+        mapped = {goal_for_action(a) for a in Action}
+        assert mapped <= set(GOAL_INSTRUCTIONS)
 
 
 class TestEscapeHatchMessage:

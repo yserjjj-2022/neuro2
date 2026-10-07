@@ -8,7 +8,7 @@ import pytest
 from src.memory.embedder import FakeEmbedder
 from src.memory.errors import MemoryStoreError
 from src.memory.models import Episode
-from src.speech.controller import SpeechController, should_speak
+from src.speech.controller import SpeechController, SpeechDecision, should_speak
 from src.speech.llm import FakeLlmClient, LlmError
 
 
@@ -163,6 +163,58 @@ class TestSpeechController:
             register="story",
         )
         assert captured["max_tokens"] == 500
+
+
+class TestSpeechAuthority:
+    """Единый авторитет решения (S4-долг): policy решает, не should_speak."""
+
+    def test_explicit_decision_speaks_ignoring_threshold(self) -> None:
+        """Явное decision.speak=True → реплика, даже если should_speak молчал.
+
+        Без ``decision`` тот же вызов (new_message=False, f ниже порога)
+        вернул бы None. Значит source of truth — переданное решение.
+        """
+        controller = SpeechController(FakeLlmClient(), f_threshold=1e9)
+        reply = controller.respond(
+            user_text="привет",
+            f=0.0,
+            valence=0.0,
+            stress=0.0,
+            task="tone",
+            new_message=False,
+            decision=SpeechDecision(speak=True, reason="policy_respond"),
+        )
+        assert reply is not None and reply != ""
+
+    def test_explicit_decision_silent_suppresses(self) -> None:
+        """Явное decision.speak=False → молчание, даже при new_message=True."""
+        controller = SpeechController(FakeLlmClient(), f_threshold=1.0)
+        reply = controller.respond(
+            user_text="привет",
+            f=100.0,  # S3-фолбэк сказал бы «говорить»
+            valence=0.0,
+            stress=0.0,
+            task="tone",
+            new_message=True,
+            decision=SpeechDecision(speak=False, reason="policy_silent"),
+        )
+        assert reply is None
+
+    def test_fallback_without_decision(self) -> None:
+        """decision=None → S3-fallback (should_speak управляет решением)."""
+        controller = SpeechController(FakeLlmClient(), f_threshold=1.0)
+        assert (
+            controller.respond(
+                user_text="привет",
+                f=0.0,
+                valence=0.0,
+                stress=0.0,
+                task="tone",
+                new_message=False,
+                decision=None,
+            )
+            is None
+        )
 
 
 class TestValidation:

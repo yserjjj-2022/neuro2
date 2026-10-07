@@ -24,9 +24,13 @@ from src.host.gate import (
     CapabilityTier,
 )
 from src.host.loop import HostLoop
-from src.speech.controller import SpeechController
+from src.speech.controller import SpeechController, SpeechDecision
 from src.speech.history import ConversationHistory
-from src.speech.intent import escape_hatch_message, report_reset_intent
+from src.speech.intent import (
+    escape_hatch_message,
+    goal_for_action,
+    report_reset_intent,
+)
 from src.speech.status import format_status
 from src.tm import JointAgency, PartnerModel, VigilanceGate
 
@@ -211,7 +215,7 @@ class ChatSession:
             self.output_fn(report.text)
             return True
 
-        goal, allow_speak = self._decide_goal(
+        goal, allow_speak, speech_decision = self._decide_goal(
             has_new_message=True, partner=partner
         )
         if not allow_speak:
@@ -225,7 +229,7 @@ class ChatSession:
         required = {Capability.SPEAK}
         if goal in ("initiative", "identify_partner"):
             required.add(Capability.THINK)
-        decision = self.gate.request(
+        gate_decision = self.gate.request(
             ActionRequest(
                 name="speak",
                 tier=CapabilityTier.T1,
@@ -234,7 +238,7 @@ class ChatSession:
                 capabilities=frozenset(required),
             )
         )
-        if not decision.allowed:
+        if not gate_decision.allowed:
             self.output_fn("[хост промолчал]")
             return True
 
@@ -249,6 +253,7 @@ class ChatSession:
             new_message=True,
             goal=goal,
             partner_name=partner_name,
+            decision=speech_decision,
         )
         if reply is None:
             self.output_fn("[хост промолчал]")
@@ -260,25 +265,30 @@ class ChatSession:
 
     def _decide_goal(
         self, *, has_new_message: bool, partner: PartnerView | None = None
-    ) -> tuple[str | None, bool]:
+    ) -> tuple[str | None, bool, SpeechDecision]:
         """Решить речевое действие через policy (S4/S5) или S3-дефолт.
+
+        Policy — **единственный авторитет** решения о речи (S4-долг): её
+        ``SpeechDecision`` передаётся в ``SpeechController.respond``, который
+        больше не вызывает ``should_speak``. При ``policy=None/disabled``
+        решение принимает S3-fallback (``should_speak`` внутри controller,
+        ``decision=None``).
 
         Args:
             has_new_message: Пришло ли новое сообщение оператора.
             partner: Состояние партнёра (ToM, S5) или None (S4-совместимость).
 
         Returns:
-            (goal, allow_speak): цель реплики для IntentFrame и разрешение
-            говорить. При ``policy=None`` или ``policy.enabled=False`` —
-            S3-поведение (goal=None).
+            (goal, allow_speak, decision): цель реплики для IntentFrame,
+            разрешение говорить и решение о речи (None → S3-fallback).
         """
         if self.policy is None or not self.policy.enabled:
-            return None, True
+            return None, True, None
 
         # Рефлекс-throttle запрещает дорогой инициативный вызов LLM, но
         # ответ на сообщение сохраняется (S4_SPEC §3).
         if self.loop.last_throttle.llm_gate and not has_new_message:
-            return None, False
+            return None, False, SpeechDecision(speak=False, reason="throttle")
 
         context = self.loop.policy_context(
             has_new_message=has_new_message, mode=self.policy.mode, partner=partner
@@ -286,12 +296,11 @@ class ChatSession:
         trace = select_action(context, self.policy.preferences)
         self.loop.record_policy(trace)
         if trace.chosen is Action.SILENT:
-            return None, False
-        if trace.chosen is Action.IDENTIFY_PARTNER:
-            return "identify_partner", True
-        if trace.chosen is Action.INITIATIVE:
-            return "initiative", True
-        return "respond", True
+            return None, False, SpeechDecision(speak=False, reason="policy_silent")
+        # Полный маппинг Action → goal (S4-долг): EXPLORE и прочие цели не
+        # проваливаются в "respond".
+        goal = goal_for_action(trace.chosen)
+        return goal, True, SpeechDecision(speak=True, reason=trace.chosen.value)
 
     def _active_task(self) -> str:
         """Тег активной задачи (колонки) по текущему аттрактору."""

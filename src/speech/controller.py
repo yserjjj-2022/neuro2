@@ -128,6 +128,7 @@ class SpeechController:
         new_message: bool = True,
         goal: str | None = None,
         partner_name: str = "",
+        decision: SpeechDecision | None = None,
     ) -> str | None:
         """Событийный ответ: frame → messages → LLM.
 
@@ -142,13 +143,19 @@ class SpeechController:
             new_message: Пришло ли новое сообщение.
             goal: Цель реплики из policy (S4); None → "respond" (S3).
             partner_name: Принятое имя партнёра (S5); "" → без вокатива.
+            decision: Готовое решение о речи (policy — S4). Если задано,
+                ``should_speak`` **не** вызывается: policy — единственный
+                авторитет, ``should_speak`` — рудимент S3 (fallback при
+                ``decision=None``).
 
         Returns:
             Текст ответа или None (не отвечаем / сбой LLM).
         """
-        decision = should_speak(
-            new_message=new_message, f=f, f_threshold=self.f_threshold
-        )
+        if decision is None:
+            # S3-fallback: policy не решала (policy=None/disabled в ChatSession).
+            decision = should_speak(
+                new_message=new_message, f=f, f_threshold=self.f_threshold
+            )
         if not decision.speak:
             return None
 

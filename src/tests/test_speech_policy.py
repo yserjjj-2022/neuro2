@@ -162,10 +162,11 @@ class TestThrottleLlmGate:
         session.loop.last_throttle = type(session.loop.last_throttle)(
             active=True, llm_gate=True, reason="test"
         )
-        goal, allow = session._decide_goal(has_new_message=False)
+        goal, allow, decision = session._decide_goal(has_new_message=False)
         session.loop.close()
         assert goal is None
         assert allow is False
+        assert decision is not None and not decision.speak
 
     def test_gate_allows_message_reply(self, tmp_path: Path) -> None:
         """Под throttle ответ на сообщение сохраняется (не инициатива)."""
@@ -173,7 +174,8 @@ class TestThrottleLlmGate:
         session.loop.last_throttle = type(session.loop.last_throttle)(
             active=True, llm_gate=True, reason="test"
         )
-        goal, allow = session._decide_goal(has_new_message=True)
+        goal, allow, decision = session._decide_goal(has_new_message=True)
         session.loop.close()
         assert allow is True
         assert goal == "respond"
+        assert decision is not None and decision.speak

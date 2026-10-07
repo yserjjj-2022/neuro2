@@ -105,6 +105,7 @@ class HostLoop:
     time_scale: float = 1.0
     memory: MemoryRouter | None = None
     message_provider: TextMessageProvider | None = None
+    recall_enabled: bool = True
     selfcontrol: SelfMonitor | None = None
     autonomy_config: AutonomyConfig | None = None
     probe_effector: ProbeEffector | None = None
@@ -257,7 +258,13 @@ class HostLoop:
 
         query = self.memory.context_embedding(text)
         self._cached_query = query
-        self._cached_prior = self.memory.recall_prior(query)
+        # Ablation содержания памяти: recall выключен → канал остаётся, но
+        # «молчит» (нулевой prior). Провайдер/размерность не меняются.
+        self._cached_prior = (
+            self.memory.recall_prior(query)
+            if self.recall_enabled
+            else np.zeros(self.memory.prior_dim, dtype=np.float64)
+        )
         return query
 
     def step_once(self, tick: int) -> TickOutcome:
@@ -905,6 +912,7 @@ def build_host_loop(
         time_scale=config.time_scale,
         memory=memory,
         message_provider=message_provider,
+        recall_enabled=config.memory.recall_enabled,
         selfcontrol=selfcontrol,
         autonomy_config=config.autonomy,
         probe_effector=probe_effector,

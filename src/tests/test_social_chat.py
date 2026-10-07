@@ -120,7 +120,9 @@ class TestIdentifyPartner:
             ),
         )
         partner = PartnerState(uncertainty=1.0)
-        goal, allow = session._decide_goal(has_new_message=True, partner=partner)
+        goal, allow, _decision = session._decide_goal(
+            has_new_message=True, partner=partner
+        )
         session.loop.close()
         assert allow is True
         assert goal == "identify_partner"
@@ -139,7 +141,9 @@ class TestIdentifyPartner:
             ),
         )
         partner = PartnerState(uncertainty=0.0)
-        goal, allow = session._decide_goal(has_new_message=True, partner=partner)
+        goal, allow, _decision = session._decide_goal(
+            has_new_message=True, partner=partner
+        )
         session.loop.close()
         assert allow is True
         assert goal == "respond"

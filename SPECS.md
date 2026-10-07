@@ -38,6 +38,7 @@
 | `host/sensitivity` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/diagnostic` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/probes` | — | — | — | ✅ реализовано (S7) | S7 |
+| `host/behavioral_chain` | — | — | — | ✅ скелет: звенья 1–2 (state/decision) | VALIDATION §7 |
 | `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
 | `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (931) | все |
 

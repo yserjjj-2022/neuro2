@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from src.core.policy import Action
+
 # Речевые режимы: длина/форма ответа. Выбор режима — S4 (policy).
 REGISTER_MAX_TOKENS: dict[str, int] = {
     "terse": 16,
@@ -47,10 +49,45 @@ GOAL_INSTRUCTIONS: dict[str, str] = {
         "Цель: мягко уточнить, с кем ты говоришь (например, спросить имя). "
         "Это приглашение, не допрос: один ненавязчивый вопрос, без давления."
     ),
+    "explore": (
+        "Цель: прояснить неопределённость — задать уточняющий вопрос или "
+        "сформулировать проверяемую гипотезу. Не выдумывай факты и не "
+        "притворяйся, что знаешь больше, чем знаешь."
+    ),
     "silent": (
         "Цель: не отвечать. Реплика не нужна."
     ),
 }
+
+# Единый маппинг решения policy в цель интента (S4-долг). Держится рядом с
+# ``GOAL_INSTRUCTIONS``, чтобы каждая цель имела инструкцию, а каждое действие —
+# цель: рассинхрон ловится тестом (звено 3).
+_ACTION_TO_GOAL: dict[Action, str] = {
+    Action.RESPOND: "respond",
+    Action.INITIATIVE: "initiative",
+    Action.IDENTIFY_PARTNER: "identify_partner",
+    Action.EXPLORE: "explore",
+    Action.SILENT: "silent",
+}
+
+
+def goal_for_action(action: Action) -> str:
+    """Цель интента для выбранного действия policy (чистая, S4-долг).
+
+    Полный маппинг ``Action → goal``: каждое действие имеет цель, включая
+    ``EXPLORE`` (раньше проваливался в ``respond`` и интент «врал»). Держит
+    маппинг в одном месте рядом с ``GOAL_INSTRUCTIONS``.
+
+    Args:
+        action: Выбранное действие policy.
+
+    Returns:
+        Цель реплики для ``IntentFrame``.
+
+    Raises:
+        KeyError: Если действие не покрыто (защита от рассинхрона).
+    """
+    return _ACTION_TO_GOAL[action]
 
 
 def register_max_tokens(register: str) -> int:
