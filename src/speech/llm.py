@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class LlmError(Exception):
 class LlmClient(Protocol):
     """Контракт LLM-клиента: messages → текст ответа."""
 
-    def reply(self, messages: list[dict], max_tokens: int = 256) -> str:
+    def reply(self, messages: list[dict[str, Any]], max_tokens: int = 256) -> str:
         """Сгенерировать ответ по истории сообщений.
 
         Args:
@@ -86,7 +86,7 @@ class FakeLlmClient:
 
     prefix: str = "ok"
 
-    def reply(self, messages: list[dict], max_tokens: int = 256) -> str:
+    def reply(self, messages: list[dict[str, Any]], max_tokens: int = 256) -> str:
         """Шаблонный ответ (детерминированный).
 
         Args:
@@ -162,7 +162,7 @@ class ApiLlmClient:
         self._client = OpenAI(api_key=key, base_url=self.base_url)
         return self._client
 
-    def reply(self, messages: list[dict], max_tokens: int = 256) -> str:
+    def reply(self, messages: list[dict[str, Any]], max_tokens: int = 256) -> str:
         """Сгенерировать ответ через OpenAI-совместимый API.
 
         Args:
