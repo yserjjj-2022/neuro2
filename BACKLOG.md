@@ -296,7 +296,9 @@ B (мета-пластичность, само-модель) — горизон�
 | [test] Fidelity-harness преобразователя: минимум осей ✅ | valence/stress/goal-scope; маскирование/инверсия/фабрикация; порядок, не абсолют; лексикон (CI) + эмбеддинги (opt-in). Реализовано: `FidelityHarness`, `ToneAxis`/`DistortionClass`/`check_fidelity`, `LexiconToneScorer` + `EmbeddingToneScorer` | VALIDATION §7.6 | P1 | 2026-10-07 |
 | [test] Fidelity-harness: расширение осей | По мере появления механизмов: familiarity (после двухрегистрового чувства), timing/pause, recollection/имя, metacog_conflict (S6). Каждая ось — новые классы искажения | VALIDATION §7.6; BACKLOG «чувство собеседника» | P2 | 2026-10-07 |
 | [test] Предусловия born/primed/matured ✅ | Проба декларирует предусловие, runner фильтрует; primed — прогрев в одном прогоне, matured — длинный harness. Реализовано: `Precondition`/`PreconditionKind`, `applies_to`, `run_all(precondition=...)`, `run_matured` | VALIDATION §7.8 | P2 | 2026-10-07 |
-| [test] CLI-вход и отчёт b-теста ✅ | `python -m src --behavioral [--behavioral-precondition born\|primed\|matured] [--behavioral-warmup N] [--behavioral-json PATH]`: построчная сводка (id/звено/предусловие/классы реакций/LLM-вызовы/причина) + `summarize()` + `report_dict` в JSON; код выхода 0/1. Реализовано: `_run_behavioral`/`_format_reactions`, Core `result_dict`/`report_dict` | VALIDATION §7.1; ADR-0010 §7 | P1 | 2026-10-08 |
+| [test] CLI-вход и отчёт b-теста ✅ | `python -m src --behavioral [--behavioral-precondition born\|primed\|matured] [--behavioral-warmup N] [--behavioral-json PATH]`: микроотчёт по сценариям + `summarize()` + `report_dict` в JSON; код выхода 0/1. Реализовано: `_run_behavioral`/`_render_micro_report`, Core `result_dict`/`report_dict` | VALIDATION §7.1; ADR-0010 §7 | P1 | 2026-10-08 |
+| [test] Человекочитаемость чисел: декомпозиция операций ✅ | Число без «сколько должно быть» нечитаемо. `operation_facts` разлагает прогон на операции (число/причина/ожидаемое); `llm_calls` = говорящие решения − throttle (llm_gate), escape — отдельная операция. Микроотчёт: шаблонный (не нейронка), доли от измеренных тиков | VALIDATION §7.1 | P1 | 2026-10-08 |
+| [test] Эталон для наблюдаемых (калибровка) ✅ | Инварианты показывают `expected`; наблюдаемые (доля речи/escape) калибруются по эталонному прогону. Реализовано: `observed_shares`/`baseline_dict`/`compare_to_baseline`; CLI `--behavioral-save-baseline`/`--behavioral-baseline`/`--behavioral-band` (±5%), сравнение объединения операций (отсутствующая = 0.0), выход за полосу — сигнал, не провал ворот | VALIDATION §7.1, §7.7 | P2 | 2026-10-08 |
 | [test] Накопительный harness (mature-уровень) | Отдельный объект от канала: что выросло из истории — узнавание (ToM-сигнатура), recall эпизодов, доверие, дрейф, межсессионная персистентность. Родственный C10; **не** расширение born/primed-корпуса (критерий приёмки §7.8). Требует подключить ToM/recall в прогон и наблюдаемые накопления | VALIDATION §7.8; §7.5; BACKLOG «чувство собеседника» | P2 | 2026-10-08 |
 | [viz] Визуализатор состояния | Инструмент наблюдения (read-only), не судья и не ворота. Кандидаты: (1) однострочный «пульс» спарклайнами поверх телеметрии; (2) «полоса жизни» из `fingerprint` (11 метрик → штрихкод, сравнение прогонов); (3) фазовый портрет (valence×stress / F×γ) в `reports/`. Рекомендация: начать с (2) — переиспользует готовый отпечаток. Не подменяет числовые инварианты | VALIDATION §7; `host/fingerprint.py`; `host/status.py` | P2 | 2026-10-07 |
 
@@ -310,6 +312,8 @@ B (мета-пластичность, само-модель) — горизон�
 
 *Просмотр результата (нужно, чтобы «прогнать и посмотреть»):*
 - [x] CLI-вход `--behavioral` + отчёт (сводка + JSON) — P1;
+- [x] Декомпозиция операций (человекочитаемость чисел) — P1;
+- [x] Эталон наблюдаемых (калибровка по полосе) — P2;
 - [ ] (опц.) выгрузка отчёта в `reports/`.
 
 *Расширения — P2, по мере появления механизмов (не блокируют закрытие):*

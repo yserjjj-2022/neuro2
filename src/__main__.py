@@ -38,7 +38,9 @@ from src.speech import (
 from src.tm import JointAgency, PartnerModel, VigilanceGate
 
 if TYPE_CHECKING:
-    from src.host.behavioral_chain import ReactionClass
+    from collections.abc import Mapping
+
+    from src.host.behavioral_chain import Deviation, ScenarioResult
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Путь для JSON-отчёта b-теста (None → без файла).",
     )
     parser.add_argument(
+        "--behavioral-baseline",
+        type=Path,
+        default=None,
+        help="JSON-эталон наблюдаемых долей для сравнения (None → без сравнения).",
+    )
+    parser.add_argument(
+        "--behavioral-save-baseline",
+        type=Path,
+        default=None,
+        help="Путь, куда записать эталон наблюдаемых долей текущего прогона.",
+    )
+    parser.add_argument(
+        "--behavioral-band",
+        type=float,
+        default=0.05,
+        help="Полуширина полосы сравнения с эталоном (доля). По умолчанию 0.05.",
+    )
+    parser.add_argument(
         "--diagnose",
         action="store_true",
         help="Запустить диагностическую сессию (дерево проб, S7-C).",
@@ -308,40 +328,113 @@ def _run_sensitivity(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _format_reactions(reactions: tuple[ReactionClass, ...]) -> str:
-    """Сжать классы реакций в счётчики (для читаемой строки отчёта).
+# Человекочитаемые подписи операций и звеньев для микроотчёта (VALIDATION §7.1).
+_OPERATION_LABELS: dict[str, str] = {
+    "silent": "промолчал",
+    "respond": "ответил на сообщение",
+    "initiative": "проявил инициативу",
+    "identify_partner": "идентифицировал партнёра",
+    "explore": "исследовал",
+    "escape_hatch": "ушёл в escape hatch (перегрузка, без LLM)",
+    "llm_call": "вызвал LLM",
+    "throttled": "отсечён throttle",
+}
+
+_LINK_LABELS: dict[str, str] = {
+    "state": "состояние",
+    "decision": "решение",
+    "intent": "интент",
+    "actuation": "актюация",
+    "reply": "реплика",
+}
+
+
+def _plural_raz(n: int) -> str:
+    """Согласовать «раз/раза» с числом (человекочитаемость).
 
     Args:
-        reactions: Классы реакций по тикам.
+        n: Число.
 
     Returns:
-        Строка вида ``silent×115, initiative×5`` (или ``-`` при пустом вводе).
+        ``"раз"`` или ``"раза"``.
     """
-    counts: dict[str, int] = {}
-    for reaction in reactions:
-        key = reaction.value
-        counts[key] = counts.get(key, 0) + 1
-    if not counts:
-        return "-"
-    return ", ".join(
-        f"{name}×{count}" for name, count in sorted(counts.items())
-    )
+    if n % 10 == 1 and n % 100 != 11:
+        return "раз"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return "раза"
+    return "раз"
+
+
+def _render_micro_report(
+    result: ScenarioResult,
+    deviations: Mapping[str, Deviation] | None = None,
+) -> list[str]:
+    """Собрать микроотчёт по одному сценарию: операции с числом и ожидаемым.
+
+    Декомпозиция (``operation_facts``) делает числа интерпретируемыми: видно,
+    сколько раз хост выполнил каждую операцию, почему и сколько *ожидалось* для
+    инварианта. Доля — от числа измеренных тиков (без прогрева; §7.8). Если
+    передан эталон (``deviations``), наблюдаемые операции получают ссылку на
+    эталонную долю и смещение по полосе (§7.1).
+
+    Args:
+        result: Результат прогона.
+        deviations: Отклонения наблюдаемых этого сценария (операция → эталон).
+
+    Returns:
+        Строки отчёта (заголовок + операции + причина провала).
+    """
+    from src.host.behavioral_chain import operation_facts
+
+    scenario = result.scenario
+    verdict = "OK" if result.passed else "FAIL"
+    link = _LINK_LABELS.get(scenario.link, scenario.link)
+    measured = scenario.ticks - scenario.measure_from()
+    lines = [f"{scenario.id} · {link} · {scenario.precondition} — {verdict}"]
+
+    for fact in operation_facts(result):
+        label = _OPERATION_LABELS.get(fact.operation, fact.operation)
+        ratio = fact.count / measured if measured else 0.0
+        share = f" ({ratio:.0%})" if ratio >= 0.01 else ""
+        expected = ""
+        if fact.expected is not None:
+            mark = "✓" if fact.holds else "✗"
+            expected = f" — ожидаемо {fact.expected} {mark}"
+        elif deviations is not None and fact.operation in deviations:
+            deviation = deviations[fact.operation]
+            mark = "✓" if deviation.within_band else "✗"
+            expected = (
+                f" — эталон {deviation.baseline:.0%} (Δ{deviation.delta:+.0%}) {mark}"
+            )
+        reason = f" ({fact.reason})" if fact.reason else ""
+        lines.append(
+            f"    {label}: {fact.count} {_plural_raz(fact.count)}"
+            f"{share}{expected}{reason}"
+        )
+
+    if not result.passed:
+        lines.append(f"    причина провала: {result.reason}")
+    return lines
 
 
 def _run_behavioral(args: argparse.Namespace) -> int:
-    """Прогнать поведенческий автотест по звеньям и напечатать отчёт (S7).
+    """Прогнать поведенческий автотест по звеньям и напечатать микроотчёт (S7).
 
     Args:
         args: Аргументы CLI (behavioral_precondition, behavioral_warmup,
-            behavioral_json).
+            behavioral_json, behavioral_baseline, behavioral_save_baseline,
+            behavioral_band).
 
     Returns:
-        Код выхода: 0, если провалов нет, иначе 1.
+        Код выхода: 0, если провалов инвариантов нет, иначе 1. Отклонение от
+        эталона наблюдаемых — калибровочный сигнал (§7.1), код не меняет.
     """
     from src.host.behavioral_chain import (
         BehavioralChainRunner,
         Precondition,
         PreconditionKind,
+        baseline_dict,
+        compare_to_baseline,
         report_dict,
         summarize,
     )
@@ -356,22 +449,44 @@ def _run_behavioral(args: argparse.Namespace) -> int:
         )
 
     results = BehavioralChainRunner().run_all(precondition=precondition)
+
+    deviations_by_scenario: dict[str, dict[str, Deviation]] = {}
+    out_of_band = 0
+    if args.behavioral_baseline is not None:
+        baseline = json.loads(args.behavioral_baseline.read_text(encoding="utf-8"))
+        for deviation in compare_to_baseline(
+            results, baseline, band=args.behavioral_band
+        ):
+            deviations_by_scenario.setdefault(deviation.scenario_id, {})[
+                deviation.operation
+            ] = deviation
+            if not deviation.within_band:
+                out_of_band += 1
+
     for result in results:
-        scenario = result.scenario
-        verdict = "OK" if result.passed else "FAIL"
-        reactions = _format_reactions(result.reactions)
-        print(
-            f"[{verdict}] {scenario.id} ({scenario.link}, {scenario.precondition}) "
-            f"reactions: {reactions} | llm={result.llm_calls}"
-        )
-        if not result.passed:
-            print(f"        reason: {result.reason}")
+        for line in _render_micro_report(
+            result, deviations_by_scenario.get(result.scenario.id)
+        ):
+            print(line)
+        print()
 
     summary = summarize(results)
     print(
         f"behavioral: {summary['passed']}/{summary['total']} passed "
         f"(failed={summary['failed_ids']})"
     )
+    if args.behavioral_baseline is not None:
+        total = sum(len(d) for d in deviations_by_scenario.values())
+        print(
+            f"behavioral: baseline band ±{args.behavioral_band:.0%}: "
+            f"{total - out_of_band}/{total} within band"
+        )
+    if args.behavioral_save_baseline is not None:
+        args.behavioral_save_baseline.write_text(
+            json.dumps(baseline_dict(results), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"behavioral: baseline written to {args.behavioral_save_baseline}")
     if args.behavioral_json is not None:
         args.behavioral_json.write_text(
             json.dumps(report_dict(results), ensure_ascii=False, indent=2),

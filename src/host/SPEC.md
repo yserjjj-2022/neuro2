@@ -430,11 +430,22 @@ class Scenario: id; link; preset; seed; ticks; messages; expect_reaction;
     precondition
 @dataclass(frozen=True)
 class ScenarioResult: scenario; reactions; violations; intent_violations;
-    actuation_violations; reply_violations; passed; reason
+    actuation_violations; reply_violations; llm_calls; passed; reason;
+    throttled_calls
 
 def default_scenarios() -> tuple[Scenario, ...]: ...
 def summarize(results) -> Mapping[str, object]: ...
 def report_dict(results) -> dict[str, Any]: ...  # JSON-отчёт (summary + scenarios)
+def operation_facts(result) -> tuple[OperationFact, ...]: ...  # декомпозиция §7.1
+def observed_shares(result) -> dict[str, float]: ...  # доли наблюдаемых (без expected)
+def baseline_dict(results) -> dict[str, Any]: ...  # JSON-эталон наблюдаемых долей
+def compare_to_baseline(results, baseline, *, band=0.05) -> tuple[Deviation, ...]: ...
+
+@dataclass(frozen=True)
+class OperationFact: operation; count; reason; expected  # holds: count == expected
+
+@dataclass(frozen=True)
+class Deviation: scenario_id; operation; observed; baseline; band  # delta/within_band
 
 class BehavioralChainRunner:
     def __init__(self, *, workdir=None, llm=None) -> None: ...
@@ -472,10 +483,29 @@ class RecordingLlmClient:  # delegates to FakeLlmClient, records calls
 
 Два входа, как у sensitivity: pytest-гейт (`test_behavioral_chain.py`) и CLI
 `--behavioral [--behavioral-precondition born|primed|matured]
-[--behavioral-warmup N] [--behavioral-json PATH]` (ADR-0010 §7). CLI печатает
-построчную сводку (id, звено, предусловие, классы реакций, число LLM-вызовов,
-причина провала) + итог `summarize`, при `--behavioral-json` пишет `report_dict`
-(сериализуемый `{"summary", "scenarios"}`); код выхода 0 без провалов, иначе 1.
+[--behavioral-warmup N] [--behavioral-json PATH] [--behavioral-baseline PATH]
+[--behavioral-save-baseline PATH] [--behavioral-band F]` (ADR-0010 §7). CLI
+печатает **микроотчёт** по сценарию: заголовок (id · звено · предусловие —
+вердикт) и операции из `operation_facts` (число, доля от измеренных тиков,
+причина, ожидаемое с ✓/✗); итог `summarize`. При `--behavioral-json` пишет
+`report_dict` (сериализуемый `{"summary", "scenarios"}`); код выхода 0 без
+провалов, иначе 1.
+
+**Декомпозиция чисел (VALIDATION §7.1).** `operation_facts` разлагает прогон на
+операции и делает числа интерпретируемыми: `llm_calls` выводится из числа
+говорящих решений за вычетом `throttled_calls` (llm_gate), escape hatch —
+отдельная операция (LLM не вызывается) и в говорящие не входит. Инварианты
+показывают `expected` (точно выведенное значение), наблюдаемые — только число и
+долю (калибруются по эталону, не проверяются). Пример строки:
+`вызвал LLM: 125 раз (8%) — ожидаемо 125 ✓ (= 127 говорящих решений − 2 throttle)`.
+
+**Эталон наблюдаемых (калибровка, §7.1).** `--behavioral-save-baseline PATH`
+пишет снимок долей (`baseline_dict`), `--behavioral-baseline PATH` читает его и
+дополняет наблюдаемые строки смещением: `эталон 42% (Δ+3%) ✓`. Полоса —
+`--behavioral-band` (по умолчанию ±5%). `compare_to_baseline` сравнивает
+**объединение** операций (отсутствующая = доля 0.0), ловя и появление, и
+исчезновение поведения. Выход за полосу — калибровочный сигнал (§7.7), а не
+провал: код выхода от него не зависит.
 
 ## Fidelity harness (behavioral_chain.py, VALIDATION §7.6)
 

@@ -14,6 +14,7 @@ from src.host.behavioral_chain import (
     ActuationInvariant,
     ActuationView,
     BehavioralChainRunner,
+    Deviation,
     DistortionClass,
     EmbeddingToneScorer,
     FailingLlmClient,
@@ -33,6 +34,7 @@ from src.host.behavioral_chain import (
     StateInvariant,
     StateView,
     ToneAxis,
+    baseline_dict,
     check_actuation,
     check_fidelity,
     check_intent,
@@ -40,11 +42,14 @@ from src.host.behavioral_chain import (
     check_state,
     classify_reaction,
     classify_reply,
+    compare_to_baseline,
     default_ablations,
     default_fidelity_pairs,
     default_scenarios,
     intent_from_state,
     llm_responder,
+    observed_shares,
+    operation_facts,
     report_dict,
     result_dict,
     summarize,
@@ -896,24 +901,223 @@ class TestReport:
         text = json.dumps(report, ensure_ascii=False)
         assert '"failed_ids": ["a"]' in text
 
+    def test_result_dict_includes_throttled(self) -> None:
+        data = result_dict(_result("a", passed=True, throttled_calls=2))
+        assert data["throttled_calls"] == 2
+
+
+class TestOperationFacts:
+    """Декомпозиция прогона на операции с ожидаемым (Core; VALIDATION §7.1)."""
+
+    def test_llm_expected_from_speaking_minus_throttle(self) -> None:
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(
+                ReactionClass.RESPOND,
+                ReactionClass.INITIATIVE,
+                ReactionClass.INITIATIVE,
+                ReactionClass.SILENT,
+            ),
+            llm_calls=2,
+            throttled_calls=1,
+        )
+        facts = {f.operation: f for f in operation_facts(result)}
+        assert facts["llm_call"].count == 2
+        assert facts["llm_call"].expected == 2
+        assert facts["llm_call"].holds
+        assert facts["silent"].count == 1
+        assert facts["throttled"].count == 1
+
+    def test_no_throttle_no_throttled_fact(self) -> None:
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.INITIATIVE,),
+            llm_calls=1,
+        )
+        operations = {f.operation for f in operation_facts(result)}
+        assert "throttled" not in operations
+        llm = next(f for f in operation_facts(result) if f.operation == "llm_call")
+        assert llm.expected == 1
+        assert llm.holds
+
+    def test_escape_hatch_not_speaking(self) -> None:
+        """Escape hatch не вызывает LLM → в говорящие не входит."""
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.ESCAPE_HATCH, ReactionClass.SILENT),
+            llm_calls=0,
+        )
+        llm = next(f for f in operation_facts(result) if f.operation == "llm_call")
+        assert llm.expected == 0
+        assert llm.holds
+
+    def test_mismatch_not_holds(self) -> None:
+        """Факт LLM расходится с ожидаемым → holds False (провал инварианта)."""
+        result = _result(
+            "a",
+            passed=False,
+            reactions=(ReactionClass.RESPOND,),
+            llm_calls=0,
+        )
+        llm = next(f for f in operation_facts(result) if f.operation == "llm_call")
+        assert llm.expected == 1
+        assert not llm.holds
+
+
+class TestObservedShares:
+    """Доли наблюдаемых операций без точного эталона (Core; §7.1)."""
+
+    def test_excludes_invariant_operations(self) -> None:
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.RESPOND, ReactionClass.SILENT),
+            llm_calls=1,
+        )
+        shares = observed_shares(result)
+        assert "llm_call" not in shares
+        assert shares["respond"] == pytest.approx(1 / 120)
+        assert shares["silent"] == pytest.approx(1 / 120)
+
+    def test_empty_when_only_invariants(self) -> None:
+        assert observed_shares(_result("a", passed=True)) == {}
+
+
+class TestBaseline:
+    """Эталон наблюдаемых долей: снимок и сравнение по полосе (Core; §7.1)."""
+
+    def test_baseline_dict_shape_and_json(self) -> None:
+        import json
+
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.RESPOND, ReactionClass.SILENT),
+            llm_calls=1,
+        )
+        data = baseline_dict([result])
+        assert data["version"] == 1
+        assert set(data["scenarios"]["a"]) == {"respond", "silent"}
+        json.dumps(data)  # сериализуемо
+
+    def test_compare_within_band(self) -> None:
+        result = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.RESPOND,) * 6 + (ReactionClass.SILENT,) * 114,
+            llm_calls=6,
+        )
+        deviations = compare_to_baseline([result], baseline_dict([result]), band=0.05)
+        assert deviations
+        assert all(d.within_band for d in deviations)
+        assert all(d.delta == pytest.approx(0.0) for d in deviations)
+
+    def test_compare_out_of_band(self) -> None:
+        before = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.SILENT,) * 120,
+        )
+        after = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.SILENT,) * 108 + (ReactionClass.RESPOND,) * 12,
+            llm_calls=12,
+        )
+        deviations = compare_to_baseline([after], baseline_dict([before]), band=0.05)
+        silent = next(d for d in deviations if d.operation == "silent")
+        assert silent.baseline == pytest.approx(1.0)
+        assert silent.observed == pytest.approx(0.9)
+        assert not silent.within_band
+
+    def test_missing_scenario_skipped(self) -> None:
+        result = _result("a", passed=True, reactions=(ReactionClass.RESPOND,))
+        baseline = {"version": 1, "scenarios": {"b": {"respond": 1.0}}}
+        assert compare_to_baseline([result], baseline) == ()
+
+    def test_emerged_operation_uses_zero_baseline(self) -> None:
+        """Операция, которой не было в эталоне, сравнивается с долей 0.0."""
+        before = _result("a", passed=True, reactions=(ReactionClass.SILENT,) * 120)
+        after = _result(
+            "a",
+            passed=True,
+            reactions=(ReactionClass.RESPOND,) * 12 + (ReactionClass.SILENT,) * 108,
+            llm_calls=12,
+        )
+        deviations = compare_to_baseline([after], baseline_dict([before]), band=0.05)
+        respond = next(d for d in deviations if d.operation == "respond")
+        assert respond.baseline == 0.0
+        assert respond.observed == pytest.approx(0.1)
+        assert not respond.within_band
+
+
+class TestMicroReport:
+    """Микроотчёт: операции с числом/долей/ожидаемым (CLI; §7.1)."""
+
+    def test_plural_raz(self) -> None:
+        from src.__main__ import _plural_raz
+
+        assert _plural_raz(1) == "раз"
+        assert _plural_raz(2) == "раза"
+        assert _plural_raz(5) == "раз"
+        assert _plural_raz(11) == "раз"
+        assert _plural_raz(22) == "раза"
+
+    def test_render_ok_lines(self) -> None:
+        from src.__main__ import _render_micro_report
+
+        result = _result(
+            "s1",
+            passed=True,
+            reactions=(ReactionClass.RESPOND, ReactionClass.SILENT),
+            llm_calls=1,
+        )
+        lines = _render_micro_report(result)
+        assert lines[0] == "s1 · состояние · born — OK"
+        assert any("вызвал LLM: 1 раз" in line for line in lines)
+        assert any("ожидаемо 1 ✓" in line for line in lines)
+        assert not any("причина провала" in line for line in lines)
+
+    def test_render_failure_shows_reason(self) -> None:
+        from src.__main__ import _render_micro_report
+
+        result = _result("s2", passed=False, reactions=(ReactionClass.SILENT,))
+        lines = _render_micro_report(result)
+        assert lines[0].endswith("— FAIL")
+        assert any("причина провала" in line for line in lines)
+
+    def test_render_with_baseline_within_band(self) -> None:
+        from src.__main__ import _render_micro_report
+
+        result = _result(
+            "s1",
+            passed=True,
+            reactions=(ReactionClass.RESPOND,) * 6 + (ReactionClass.SILENT,) * 114,
+            llm_calls=6,
+        )
+        deviations = {"respond": Deviation("s1", "respond", 0.05, 0.04, 0.05)}
+        lines = _render_micro_report(result, deviations)
+        assert any("эталон 4%" in line and "✓" in line for line in lines)
+
+    def test_render_with_baseline_out_of_band(self) -> None:
+        from src.__main__ import _render_micro_report
+
+        result = _result(
+            "s1",
+            passed=True,
+            reactions=(ReactionClass.RESPOND,) * 6 + (ReactionClass.SILENT,) * 114,
+            llm_calls=6,
+        )
+        deviations = {"respond": Deviation("s1", "respond", 0.05, 0.30, 0.05)}
+        lines = _render_micro_report(result, deviations)
+        assert any("эталон 30%" in line and "✗" in line for line in lines)
+
 
 class TestBehavioralCli:
     """CLI-вход b-теста (S7; --behavioral)."""
-
-    def test_format_reactions_counts(self) -> None:
-        from src.__main__ import _format_reactions
-
-        reactions = (
-            ReactionClass.SILENT,
-            ReactionClass.SILENT,
-            ReactionClass.RESPOND,
-        )
-        assert _format_reactions(reactions) == "respond×1, silent×2"
-
-    def test_format_reactions_empty(self) -> None:
-        from src.__main__ import _format_reactions
-
-        assert _format_reactions(()) == "-"
 
     def test_parse_args_defaults(self) -> None:
         from src.__main__ import _parse_args
@@ -923,6 +1127,9 @@ class TestBehavioralCli:
         assert args.behavioral_precondition is None
         assert args.behavioral_warmup == 1
         assert args.behavioral_json is None
+        assert args.behavioral_baseline is None
+        assert args.behavioral_save_baseline is None
+        assert args.behavioral_band == 0.05
 
     def test_parse_args_flags(self) -> None:
         from src.__main__ import _parse_args
@@ -936,12 +1143,54 @@ class TestBehavioralCli:
                 "3",
                 "--behavioral-json",
                 "out.json",
+                "--behavioral-baseline",
+                "base.json",
+                "--behavioral-save-baseline",
+                "save.json",
+                "--behavioral-band",
+                "0.1",
             ]
         )
         assert args.behavioral is True
         assert args.behavioral_precondition == "primed"
         assert args.behavioral_warmup == 3
         assert args.behavioral_json == Path("out.json")
+        assert args.behavioral_baseline == Path("base.json")
+        assert args.behavioral_save_baseline == Path("save.json")
+        assert args.behavioral_band == 0.1
+
+    def test_run_behavioral_saves_and_compares_baseline(self, tmp_path: Path) -> None:
+        """Сохранённый эталон затем сравнивается: детерминизм → в полосе."""
+        import json
+
+        from src.__main__ import _parse_args, _run_behavioral
+
+        baseline_path = tmp_path / "baseline.json"
+        save_args = _parse_args(
+            [
+                "--behavioral",
+                "--behavioral-precondition",
+                "born",
+                "--behavioral-save-baseline",
+                str(baseline_path),
+            ]
+        )
+        assert _run_behavioral(save_args) == 0
+        saved = json.loads(baseline_path.read_text())
+        assert saved["version"] == 1
+        assert saved["scenarios"]
+
+        compare_args = _parse_args(
+            [
+                "--behavioral",
+                "--behavioral-precondition",
+                "born",
+                "--behavioral-baseline",
+                str(baseline_path),
+            ]
+        )
+        assert _run_behavioral(compare_args) == 0
+
 
     def test_run_behavioral_writes_json_and_passes(self, tmp_path: Path) -> None:
         """CLI-прогон born-корпуса: код 0 и сериализуемый отчёт."""
@@ -1085,18 +1334,26 @@ class TestPreconditionRunner:
         assert all(r.passed for r in results)
 
 
-def _result(scenario_id: str, *, passed: bool):
-    """Минимальный ScenarioResult для тестов сводки."""
+def _result(
+    scenario_id: str,
+    *,
+    passed: bool,
+    reactions: tuple[ReactionClass, ...] = (),
+    llm_calls: int = 0,
+    throttled_calls: int = 0,
+):
+    """Минимальный ScenarioResult для тестов сводки/декомпозиции."""
     from src.host.behavioral_chain import ScenarioResult
 
     return ScenarioResult(
         scenario=Scenario(id=scenario_id, link="state", preset="baseline"),
-        reactions=(),
+        reactions=reactions,
         violations=() if passed else ("finite",),
         intent_violations=(),
         actuation_violations=(),
         reply_violations=(),
-        llm_calls=0,
+        llm_calls=llm_calls,
         passed=passed,
         reason="ok" if passed else "state invariant violated: finite",
+        throttled_calls=throttled_calls,
     )

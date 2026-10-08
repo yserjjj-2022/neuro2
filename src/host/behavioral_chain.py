@@ -44,6 +44,11 @@ Functional Core (pure, ADR-0004):
 * :class:`Scenario` / :class:`ScenarioResult` — one test cell and its outcome.
 * :func:`summarize` / :func:`result_dict` / :func:`report_dict` — a serializable
   run report (CLI ``--behavioral`` / JSON).
+* :class:`OperationFact` / :func:`operation_facts` — human-readable decomposition
+  of a run into operations (count / reason / expected; §7.1).
+* :func:`observed_shares` / :func:`baseline_dict` / :class:`Deviation` /
+  :func:`compare_to_baseline` — calibration of observed shares against a baseline
+  band (CLI ``--behavioral-baseline`` / ``--behavioral-save-baseline``; §7.1).
 * :class:`Ablation` / :class:`AblationCheck` / :class:`AblationResult` —
   attribution checks: disabling a mechanism must *change* the observable
   (VALIDATION §7.5). Non-tautological: if nothing changes, the test was about
@@ -827,6 +832,8 @@ class ScenarioResult:
         llm_calls: Число вызовов LLM за прогон (звено 4).
         passed: Выполнен ли сценарий (нет нарушений + ожидание совпало).
         reason: Причина вердикта (для диагностики).
+        throttled_calls: Число говорящих решений, отсечённых throttle
+            (llm_gate) — вычитаемое в декомпозиции ``llm_calls`` (§7.1).
     """
 
     scenario: Scenario
@@ -838,6 +845,7 @@ class ScenarioResult:
     llm_calls: int
     passed: bool
     reason: str
+    throttled_calls: int = 0
 
 
 # Наблюдаемые для ablation: метрика отпечатка, доля policy-решений или
@@ -1135,6 +1143,7 @@ class BehavioralChainRunner:
             llm_calls=obs.llm_calls,
             passed=passed,
             reason=reason,
+            throttled_calls=obs.throttled_calls,
         )
 
     def run_all(
@@ -1368,6 +1377,15 @@ class BehavioralChainRunner:
         has_new_message = loop.current_tick in {t for t, _ in scenario.messages}
         throttled = loop.last_throttle.llm_gate and not has_new_message
         speak = trace.chosen is not Action.SILENT and not throttled
+        # Декомпозиция llm_calls: говорящее решение, отсечённое throttle
+        # (llm_gate) — вычитаемое к числу вызовов (§7.1).
+        if (
+            observe
+            and throttled
+            and not loop.escape_hatch_active
+            and trace.chosen is not Action.SILENT
+        ):
+            obs.throttled_calls += 1
         decision = SpeechDecision(speak=speak, reason=trace.chosen.value)
         before = _llm_calls(llm)
         response: str | None = None
@@ -1559,6 +1577,7 @@ class _Observables:
         reply_violations: Нарушения инвариантов реплики (звено 5).
         policy_events: Число policy-решений за прогон.
         llm_calls: Число вызовов LLM за прогон.
+        throttled_calls: Число говорящих решений, отсечённых throttle.
         events: Строки телеметрии.
     """
 
@@ -1571,6 +1590,7 @@ class _Observables:
     reply_violations: list[str] = field(default_factory=list[str])
     policy_events: int = 0
     llm_calls: int = 0
+    throttled_calls: int = 0
     events: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
 
@@ -1627,6 +1647,7 @@ def result_dict(result: ScenarioResult) -> dict[str, Any]:
         "reason": result.reason,
         "reactions": [reaction.value for reaction in result.reactions],
         "llm_calls": result.llm_calls,
+        "throttled_calls": result.throttled_calls,
         "state_violations": list(result.violations),
         "intent_violations": list(result.intent_violations),
         "actuation_violations": list(result.actuation_violations),
@@ -1656,6 +1677,223 @@ def report_dict(results: Sequence[ScenarioResult]) -> dict[str, Any]:
         },
         "scenarios": [result_dict(result) for result in results],
     }
+
+
+# Реакции-«говорение»: решение policy породить реплику (LLM вызывается, если
+# не отсечено throttle и не подменено escape hatch). Основа декомпозиции
+# ``llm_calls`` (VALIDATION §7.1).
+_SPEAKING_REACTIONS: frozenset[ReactionClass] = frozenset(
+    {
+        ReactionClass.RESPOND,
+        ReactionClass.INITIATIVE,
+        ReactionClass.IDENTIFY_PARTNER,
+        ReactionClass.EXPLORE,
+    }
+)
+
+# Порядок операций в отчёте: что хост делал (речь) → тишина → escape.
+_REACTION_ORDER: tuple[ReactionClass, ...] = (
+    ReactionClass.RESPOND,
+    ReactionClass.INITIATIVE,
+    ReactionClass.IDENTIFY_PARTNER,
+    ReactionClass.EXPLORE,
+    ReactionClass.SILENT,
+    ReactionClass.ESCAPE_HATCH,
+)
+
+
+@dataclass(frozen=True)
+class OperationFact:
+    """Одна наблюдаемая «операция» хоста за прогон (декомпозиция, §7.1).
+
+    Человекочитаемая единица отчёта: что хост сделал, сколько раз, почему и
+    сколько *ожидалось* (для инвариантов). Чистая структура — рендер в текст
+    живёт в CLI.
+
+    Attributes:
+        operation: Машинный ключ операции (``silent``, ``llm_call``, ...).
+        count: Сколько раз операция выполнена за замер.
+        reason: Причина ("" → без причины).
+        expected: Ожидаемое число для инварианта (None → наблюдаемое без
+            точного эталона; калибруется, а не проверяется).
+    """
+
+    operation: str
+    count: int
+    reason: str = ""
+    expected: int | None = None
+
+    @property
+    def holds(self) -> bool:
+        """Совпадает ли факт с ожидаемым (True, если эталона нет)."""
+        return self.expected is None or self.count == self.expected
+
+
+def operation_facts(result: ScenarioResult) -> tuple[OperationFact, ...]:
+    """Разложить прогон на наблюдаемые операции с ожидаемым (чистая, §7.1).
+
+    Декомпозиция делает числа интерпретируемыми: ``llm_calls`` выводится из
+    числа говорящих решений за вычетом throttle (llm_gate). Escape hatch —
+    отдельная операция (LLM не вызывается), поэтому в говорящие не входит.
+
+    Args:
+        result: Результат прогона.
+
+    Returns:
+        Кортеж :class:`OperationFact` в стабильном порядке: решения policy
+        (классы реакций), затем ``llm_call`` и ``throttled``.
+    """
+    counts: dict[ReactionClass, int] = {}
+    for reaction in result.reactions:
+        counts[reaction] = counts.get(reaction, 0) + 1
+
+    facts: list[OperationFact] = []
+    for reaction in _REACTION_ORDER:  # речь → тишина → escape (для чтения)
+        count = counts.get(reaction, 0)
+        if count:
+            facts.append(OperationFact(operation=reaction.value, count=count))
+
+    speaking = sum(counts.get(r, 0) for r in _SPEAKING_REACTIONS)
+    expected_llm = max(0, speaking - result.throttled_calls)
+    decomposition = f"= {speaking} говорящих решений"
+    if result.throttled_calls:
+        decomposition += f" − {result.throttled_calls} throttle"
+    facts.append(
+        OperationFact(
+            operation="llm_call",
+            count=result.llm_calls,
+            reason=decomposition,
+            expected=expected_llm,
+        )
+    )
+    if result.throttled_calls:
+        facts.append(
+            OperationFact(
+                operation="throttled",
+                count=result.throttled_calls,
+                reason="llm_gate: окно тишины после инициативы",
+            )
+        )
+    return tuple(facts)
+
+
+def observed_shares(result: ScenarioResult) -> dict[str, float]:
+    """Доли наблюдаемых операций без точного эталона (чистая, §7.1).
+
+    Наблюдаемые (доля речи/escape/throttle) не имеют выводимого «должно быть»:
+    их число калибруется по эталону (:func:`compare_to_baseline`), а не
+    проверяется. Доля считается от измеренных тиков (без прогрева; §7.8).
+
+    Args:
+        result: Результат прогона.
+
+    Returns:
+        Отображение ``операция → доля`` для фактов без ``expected``.
+    """
+    measured = result.scenario.ticks - result.scenario.measure_from()
+    return {
+        fact.operation: (fact.count / measured if measured else 0.0)
+        for fact in operation_facts(result)
+        if fact.expected is None
+    }
+
+
+def baseline_dict(results: Sequence[ScenarioResult]) -> dict[str, Any]:
+    """Сериализуемый эталон наблюдаемых долей (чистая, §7.1).
+
+    Эталон — снимок наблюдаемых долей по сценариям, снятый с принятого прогона.
+    Хранится как JSON (``--behavioral-save-baseline``) и служит полосой для
+    сравнения (``--behavioral-baseline``). Сравнивать следует внутри одного
+    предусловия (VALIDATION §7.7).
+
+    Args:
+        results: Результаты прогонов.
+
+    Returns:
+        ``{"version", "scenarios": {id: {operation: share}}}`` (JSON-совместимо).
+    """
+    return {
+        "version": 1,
+        "scenarios": {
+            result.scenario.id: observed_shares(result) for result in results
+        },
+    }
+
+
+@dataclass(frozen=True)
+class Deviation:
+    """Отклонение наблюдаемой доли от эталона (чистая, §7.1).
+
+    Наблюдаемое калибруется по **полосе**, а не проверяется абсолютом: выход за
+    полосу — сигнал пересмотреть эталон (развитие) или поймать overfit
+    (VALIDATION §7.7), но не автоматический провал ворот.
+
+    Attributes:
+        scenario_id: Идентификатор сценария.
+        operation: Машинный ключ операции.
+        observed: Наблюдаемая доля в текущем прогоне.
+        baseline: Эталонная доля.
+        band: Полуширина допустимой полосы.
+    """
+
+    scenario_id: str
+    operation: str
+    observed: float
+    baseline: float
+    band: float
+
+    @property
+    def delta(self) -> float:
+        """Смещение относительно эталона (``observed - baseline``)."""
+        return self.observed - self.baseline
+
+    @property
+    def within_band(self) -> bool:
+        """Укладывается ли смещение в полосу ``±band``."""
+        return abs(self.delta) <= self.band
+
+
+def compare_to_baseline(
+    results: Sequence[ScenarioResult],
+    baseline: Mapping[str, Any],
+    *,
+    band: float = 0.05,
+) -> tuple[Deviation, ...]:
+    """Сравнить наблюдаемые доли с эталоном по полосе (чистая, §7.1).
+
+    Сравнивается объединение операций прогона и эталона: отсутствующая операция
+    считается долей 0.0. Так ловится и **появление**, и **исчезновение**
+    поведения, а не только сдвиг уже наблюдаемого.
+
+    Args:
+        results: Результаты текущего прогона.
+        baseline: Разобранный эталон (:func:`baseline_dict`).
+        band: Полуширина допустимой полосы (доля; по умолчанию 0.05).
+
+    Returns:
+        Кортеж :class:`Deviation` для сценариев, присутствующих в эталоне
+        (порядок — по сценариям, затем по операциям).
+    """
+    scenarios = baseline.get("scenarios", {})
+    deviations: list[Deviation] = []
+    for result in results:
+        expected = scenarios.get(result.scenario.id)
+        if not expected:
+            continue
+        observed = observed_shares(result)
+        for operation in dict.fromkeys([*observed, *expected]):
+            deviations.append(
+                Deviation(
+                    scenario_id=result.scenario.id,
+                    operation=operation,
+                    observed=observed.get(operation, 0.0),
+                    baseline=float(expected[operation])
+                    if operation in expected
+                    else 0.0,
+                    band=band,
+                )
+            )
+    return tuple(deviations)
 
 
 # --- Fidelity harness (VALIDATION §7.6) --------------------------------------
