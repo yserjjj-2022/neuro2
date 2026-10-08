@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from src.memory.embedder import Embedder, EmbedderError
 from src.memory.errors import MemoryStoreError
@@ -123,7 +124,7 @@ class SpeechController:
         valence: float,
         stress: float,
         task: str,
-        history: Sequence[dict] = (),
+        history: Sequence[dict[str, Any]] = (),
         register: str | None = None,
         new_message: bool = True,
         goal: str | None = None,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -10,21 +11,41 @@ from src.core.policy import Action, PolicyCandidate, PolicyTrace
 from src.host.behavioral_chain import (
     Ablation,
     AblationCheck,
+    ActuationInvariant,
+    ActuationView,
     BehavioralChainRunner,
+    DistortionClass,
+    EmbeddingToneScorer,
+    FailingLlmClient,
+    FidelityHarness,
+    FidelityPair,
     IntentInvariant,
     IntentView,
+    LexiconToneScorer,
     ReactionClass,
+    RecordingLlmClient,
+    ReplyClass,
+    ReplyInvariant,
+    ReplyView,
     Scenario,
     StateInvariant,
     StateView,
+    ToneAxis,
+    check_actuation,
+    check_fidelity,
     check_intent,
+    check_reply,
     check_state,
     classify_reaction,
+    classify_reply,
     default_ablations,
+    default_fidelity_pairs,
     default_scenarios,
     intent_from_state,
+    llm_responder,
     summarize,
 )
+from src.speech.controller import SpeechDecision
 from src.speech.intent import build_intent_frame
 
 
@@ -241,11 +262,11 @@ class TestIntentRunner:
 
 
 class TestDefaultScenarios:
-    """Встроенный корпус звеньев 1–3."""
+    """Встроенный корпус звеньев 1–5."""
 
     def test_covers_state_decisions_intent(self) -> None:
         links = {s.link for s in default_scenarios()}
-        assert links == {"state", "decision", "intent"}
+        assert links == {"state", "decision", "intent", "actuation", "reply"}
 
     def test_ids_unique(self) -> None:
         ids = [s.id for s in default_scenarios()]
@@ -399,6 +420,356 @@ class TestAblationRunner:
         assert all(r.passed for r in results)
 
 
+class TestActuationCheck:
+    """Инварианты актюации (Core, звено 4)."""
+
+    def _view(self, **overrides: object) -> ActuationView:
+        base: dict[str, object] = {
+            "decision": SpeechDecision(speak=True, reason="respond"),
+            "called": True,
+            "response": "Понял, отвечаю.",
+            "error": False,
+            "frame_goal": "respond",
+            "action": Action.RESPOND,
+            "escape_hatch": False,
+        }
+        base.update(overrides)
+        return ActuationView(**base)  # type: ignore[arg-type]
+
+    def test_clean_passes(self) -> None:
+        assert check_actuation(self._view(), tuple(ActuationInvariant)) == ()
+
+    def test_silent_with_call_fails(self) -> None:
+        view = self._view(
+            decision=SpeechDecision(speak=False, reason="silent"),
+            called=True,
+        )
+        assert "llm_called_iff_speak" in check_actuation(
+            view, (ActuationInvariant.LLM_CALLED_IFF_SPEAK,)
+        )
+
+    def test_speak_without_call_fails(self) -> None:
+        view = self._view(called=False, response=None)
+        assert "llm_called_iff_speak" in check_actuation(
+            view, (ActuationInvariant.LLM_CALLED_IFF_SPEAK,)
+        )
+
+    def test_escape_hatch_exempt_from_call(self) -> None:
+        """Escape hatch — дешёвый путь: говорение без вызова LLM допустимо."""
+        view = self._view(called=False, response="Нагрузка высокая", escape_hatch=True)
+        assert check_actuation(view, tuple(ActuationInvariant)) == ()
+
+    def test_error_does_not_violate_response_returned(self) -> None:
+        view = self._view(called=True, response=None, error=True)
+        assert "response_returned" not in check_actuation(
+            view, (ActuationInvariant.RESPONSE_RETURNED,)
+        )
+
+    def test_frame_goal_mismatch_fails(self) -> None:
+        view = self._view(frame_goal="explore", action=Action.RESPOND)
+        assert "frame_grounded" in check_actuation(
+            view, (ActuationInvariant.FRAME_GROUNDED,)
+        )
+
+
+class TestClassifyReply:
+    """Структурная классификация реплики (Core, звено 5)."""
+
+    def test_empty(self) -> None:
+        assert classify_reply(None) is ReplyClass.EMPTY
+        assert classify_reply("   ") is ReplyClass.EMPTY
+
+    def test_question(self) -> None:
+        assert classify_reply("Как тебя зовут?") is ReplyClass.QUESTION
+
+    def test_statement(self) -> None:
+        assert classify_reply("Понял тебя.") is ReplyClass.STATEMENT
+
+
+class TestCheckReply:
+    """Структурная релевантность реплики интенту (Core, звено 5)."""
+
+    def _frame(self, goal: str):
+        return build_intent_frame(
+            f=1.0, valence=0.0, stress=0.0, task="none", goal=goal
+        )
+
+    def test_statement_ok_for_respond(self) -> None:
+        view = ReplyView(frame=self._frame("respond"), text="Понял тебя.")
+        assert check_reply(view, tuple(ReplyInvariant)) == ()
+
+    def test_statement_fails_for_explore(self) -> None:
+        view = ReplyView(frame=self._frame("explore"), text="Понял тебя.")
+        assert "class_matches_goal" in check_reply(
+            view, (ReplyInvariant.CLASS_MATCHES_GOAL,)
+        )
+
+    def test_question_ok_for_identify(self) -> None:
+        view = ReplyView(frame=self._frame("identify_partner"), text="Как звать?")
+        assert check_reply(view, (ReplyInvariant.CLASS_MATCHES_GOAL,)) == ()
+
+    def test_empty_fails_nonempty(self) -> None:
+        view = ReplyView(frame=self._frame("respond"), text=None)
+        assert "nonempty" in check_reply(view, (ReplyInvariant.NONEMPTY,))
+
+
+class TestRecordingLlmClient:
+    """Fake-LLM звеньев 4–5 (Shell)."""
+
+    def test_records_calls(self) -> None:
+        client = RecordingLlmClient()
+        assert client.call_count == 0
+        client.reply([{"role": "system", "content": "x"}])
+        assert client.call_count == 1
+
+    def test_question_for_identify_goal(self) -> None:
+        from src.speech.intent import goal_instruction
+
+        client = RecordingLlmClient()
+        system = goal_instruction("identify_partner")
+        reply = client.reply([{"role": "system", "content": system}])
+        assert classify_reply(reply) is ReplyClass.QUESTION
+
+    def test_question_for_explore_goal(self) -> None:
+        from src.speech.intent import goal_instruction
+
+        client = RecordingLlmClient()
+        system = goal_instruction("explore")
+        reply = client.reply([{"role": "system", "content": system}])
+        assert classify_reply(reply) is ReplyClass.QUESTION
+
+    def test_statement_for_respond_goal(self) -> None:
+        from src.speech.intent import goal_instruction
+
+        client = RecordingLlmClient()
+        system = goal_instruction("respond")
+        reply = client.reply([{"role": "system", "content": system}])
+        assert classify_reply(reply) is ReplyClass.STATEMENT
+
+
+class TestActuationRunner:
+    """Shell: звенья 4–5 прогоняются поверх HostLoop."""
+
+    def test_respond_scenario_calls_llm(self, tmp_path: Path) -> None:
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        result = runner.run(
+            Scenario(
+                id="actuation.respond.calls_llm",
+                link="actuation",
+                preset="dialogue",
+                messages=((0, "привет"),),
+            )
+        )
+        assert result.passed
+        assert result.llm_calls >= 1
+
+    def test_baseline_invariants_pass(self, tmp_path: Path) -> None:
+        """Инвариант «LLM вызван ⇔ решение говорить» держится и без сообщения."""
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        result = runner.run(
+            Scenario(
+                id="actuation.baseline.invariants",
+                link="actuation",
+                preset="baseline",
+            )
+        )
+        assert result.passed
+
+    def test_llm_failure_is_graceful(self, tmp_path: Path) -> None:
+        """Сбой LLM не роняет прогон: ответ None, звено 4 помечает сбой."""
+        runner = BehavioralChainRunner(
+            workdir=tmp_path, llm_factory=FailingLlmClient
+        )
+        result = runner.run(
+            Scenario(
+                id="actuation.respond.failure",
+                link="actuation",
+                preset="dialogue",
+                messages=((0, "привет"),),
+            )
+        )
+        assert result.passed
+        assert result.llm_calls >= 1
+
+    def test_reply_scenario_passes(self, tmp_path: Path) -> None:
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        result = runner.run(
+            Scenario(
+                id="reply.respond.class_matches",
+                link="reply",
+                preset="dialogue",
+                messages=((0, "привет"),),
+            )
+        )
+        assert result.passed
+        assert result.reply_violations == ()
+
+    def test_determinism_same_seed(self, tmp_path: Path) -> None:
+        scenario = Scenario(
+            id="reply.respond.class_matches",
+            link="reply",
+            preset="dialogue",
+            messages=((0, "привет"),),
+        )
+        first = BehavioralChainRunner(workdir=tmp_path / "a").run(scenario)
+        second = BehavioralChainRunner(workdir=tmp_path / "b").run(scenario)
+        assert first.llm_calls == second.llm_calls
+        assert first.reactions == second.reactions
+
+
+class TestLexiconToneScorer:
+    """Детерминированный скорер тона (Core, fidelity)."""
+
+    def test_valence_order(self) -> None:
+        scorer = LexiconToneScorer()
+        assert scorer.score("мне плохо и тяжело", ToneAxis.VALENCE) < scorer.score(
+            "мне хорошо и радостно", ToneAxis.VALENCE
+        )
+
+    def test_stress_counts(self) -> None:
+        scorer = LexiconToneScorer()
+        assert scorer.score("спокойно", ToneAxis.STRESS) < scorer.score(
+            "мне тяжело и срочно!", ToneAxis.STRESS
+        )
+
+    def test_scope_question(self) -> None:
+        scorer = LexiconToneScorer()
+        assert scorer.score("Как дела?", ToneAxis.GOAL_SCOPE) == 1.0
+        assert scorer.score("Понял.", ToneAxis.GOAL_SCOPE) == 0.0
+
+
+class TestCheckFidelity:
+    """Проверка порядка сигнала (Core, VALIDATION §7.6)."""
+
+    def _pair(self, *, expect_ordered: bool = True) -> FidelityPair:
+        return FidelityPair(
+            id="fidelity.test",
+            frame_a=build_intent_frame(
+                f=1.0, valence=-3.0, stress=0.0, task="none", goal="respond"
+            ),
+            frame_b=build_intent_frame(
+                f=1.0, valence=3.0, stress=0.0, task="none", goal="respond"
+            ),
+            axis=ToneAxis.VALENCE,
+            expect_ordered=expect_ordered,
+        )
+
+    def test_order_preserved(self) -> None:
+        result = check_fidelity(self._pair(), score_a=0.0, score_b=1.0)
+        assert result.passed
+        assert result.ordered
+        assert result.distortion is DistortionClass.NONE
+
+    def test_inversion_detected(self) -> None:
+        result = check_fidelity(self._pair(), score_a=1.0, score_b=0.0)
+        assert not result.passed
+        assert result.distortion is DistortionClass.INVERSION
+
+    def test_masking_detected(self) -> None:
+        result = check_fidelity(self._pair(), score_a=0.5, score_b=0.5)
+        assert result.distortion is DistortionClass.MASKING
+
+    def test_non_finite_fails(self) -> None:
+        result = check_fidelity(
+            self._pair(), score_a=float("nan"), score_b=1.0
+        )
+        assert not result.passed
+        assert result.distortion is DistortionClass.MASKING
+
+    def test_fabrication_detected_when_signal_absent(self) -> None:
+        """Ожидания сигнала нет: добавленный тон — фабрикация."""
+        pair = FidelityPair(
+            id="fidelity.no_signal",
+            frame_a=build_intent_frame(
+                f=1.0, valence=0.0, stress=0.0, task="none", goal="respond"
+            ),
+            frame_b=build_intent_frame(
+                f=1.0, valence=0.0, stress=0.0, task="none", goal="respond"
+            ),
+            axis=ToneAxis.VALENCE,
+            expect_ordered=False,
+        )
+        fabricated = check_fidelity(pair, score_a=0.0, score_b=2.0)
+        assert not fabricated.passed
+        assert fabricated.distortion is DistortionClass.FABRICATION
+        faithful = check_fidelity(pair, score_a=0.0, score_b=0.0)
+        assert faithful.passed
+        assert faithful.distortion is DistortionClass.NONE
+
+
+class TestFidelityHarness:
+    """Shell: fidelity-прогон с детерминированным responder."""
+
+    @staticmethod
+    def _faithful(frame) -> str:
+        """Детерминированный responder, сохраняющий сигнал."""
+        if frame.goal in ("identify_partner", "explore"):
+            return "Уточни, пожалуйста?"
+        if frame.valence < -1.0:
+            return "мне плохо и тяжело"
+        if frame.valence > 1.0:
+            return "мне хорошо и радостно"
+        if frame.stress > 5.0:
+            return "мне тяжело и срочно!"
+        return "понял"
+
+    def test_default_pairs_pass_with_faithful_responder(self) -> None:
+        harness = FidelityHarness(self._faithful)
+        results = harness.run_all()
+        assert results
+        assert all(r.passed for r in results)
+
+    def test_inverting_responder_fails(self) -> None:
+        def inverting(frame) -> str:
+            # Инверсия: высокий valence → негативный тон.
+            if frame.valence > 1.0:
+                return "мне плохо и тяжело"
+            if frame.valence < -1.0:
+                return "мне хорошо и радостно"
+            return "понял"
+
+        harness = FidelityHarness(inverting)
+        results = harness.run_all()
+        valence = [r for r in results if r.pair.axis is ToneAxis.VALENCE]
+        assert valence and not all(r.passed for r in valence)
+
+    def test_default_pairs_corpus(self) -> None:
+        pairs = default_fidelity_pairs()
+        axes = {p.axis for p in pairs}
+        assert axes == {ToneAxis.VALENCE, ToneAxis.STRESS, ToneAxis.GOAL_SCOPE}
+        assert any(not p.expect_ordered for p in pairs)  # контроль фабрикации
+
+    def test_embedding_scorer_opt_in(self) -> None:
+        """Opt-in скорер: использует реальный/fake Embedder, не сеть в CI."""
+        from src.memory.embedder import FakeEmbedder
+
+        scorer = EmbeddingToneScorer(embedder=FakeEmbedder(dim=32))
+        harness = FidelityHarness(self._faithful, scorer=scorer)
+        # Детерминированный fake-эмбеддер: порядок по scope сохранён.
+        scope = [
+            r for r in harness.run_all() if r.pair.axis is ToneAxis.GOAL_SCOPE
+        ]
+        assert scope and all(r.passed for r in scope)
+
+    @pytest.mark.skipif(
+        not (os.environ.get("LLM_API_KEY") or os.environ.get("EMBEDDER_API_KEY")),
+        reason="opt-in: real LLM fidelity run requires an API key",
+    )
+    def test_real_llm_opt_in(self) -> None:
+        """Opt-in прогон с реальной LLM: порядок сигнала, не абсолют (§7.6).
+
+        Не входит в CI-гейт: сеть и недетерминизм. Проверяет, что монотонность
+        держится хотя бы по scope (структурная ось, устойчива к формулировке).
+        """
+        from src.speech.llm import build_llm_client
+
+        llm = build_llm_client(mode="api")
+        harness = FidelityHarness(llm_responder(llm))
+        results = harness.run_all()
+        scope = [r for r in results if r.pair.axis is ToneAxis.GOAL_SCOPE]
+        assert scope and all(r.passed for r in scope)
+
+
 class TestSummarize:
     """Сводка корпуса (Core)."""
 
@@ -484,6 +855,9 @@ def _result(scenario_id: str, *, passed: bool):
         reactions=(),
         violations=() if passed else ("finite",),
         intent_violations=(),
+        actuation_violations=(),
+        reply_violations=(),
+        llm_calls=0,
         passed=passed,
         reason="ok" if passed else "state invariant violated: finite",
     )

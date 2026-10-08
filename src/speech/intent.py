@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from src.core.policy import Action
 
@@ -274,8 +275,8 @@ def _system_prompt(frame: IntentFrame) -> str:
 def render_messages(
     frame: IntentFrame,
     user_text: str,
-    history: Sequence[dict] = (),
-) -> list[dict]:
+    history: Sequence[dict[str, Any]] = (),
+) -> list[dict[str, Any]]:
     """IntentFrame + история + реплика → chat messages.
 
     Args:
@@ -286,7 +287,7 @@ def render_messages(
     Returns:
         Список messages для chat-API (system, история..., user).
     """
-    messages: list[dict] = [{"role": "system", "content": _system_prompt(frame)}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _system_prompt(frame)}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
     return messages

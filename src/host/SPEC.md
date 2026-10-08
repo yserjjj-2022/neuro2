@@ -380,6 +380,109 @@ fallback (`default_probes`/`default_start`) и JSON-загрузчик (`load_pr
 снимка). CLI: `--diagnose [--probes FILE] [--diagnose-start ID]
 [--diagnose-log PATH]`.
 
+## Behavioral chain (behavioral_chain.py, VALIDATION §7)
+
+Поведенческий автотест хоста: проверяет **канал состояния** по звеньям, а не
+«правильные ответы». Единица теста — звено; цепочка — композиция звеньев, чтобы
+провал локализовался. Блок тестов S7 (отдельной стадии нет).
+
+```python
+class ReactionClass(Enum): RESPOND; SILENT; INITIATIVE; IDENTIFY_PARTNER; EXPLORE; ESCAPE_HATCH
+class StateInvariant(Enum): FINITE; F_NONNEG; STRESS_NONNEG; PARTNER_BOUNDED
+class IntentInvariant(Enum): GOAL_CONSISTENT; AFFECT_CONSISTENT; TASK_CONSISTENT
+class ActuationInvariant(Enum): LLM_CALLED_IFF_SPEAK; RESPONSE_RETURNED; FRAME_GROUNDED
+class ReplyInvariant(Enum): CLASS_MATCHES_GOAL; NONEMPTY
+class ReplyClass(Enum): STATEMENT; QUESTION; EMPTY
+
+@dataclass(frozen=True)
+class StateView: tick; f; valence; stress; gamma; task; active_columns; drift;
+    partner_trust; partner_uncertainty
+@dataclass(frozen=True)
+class IntentView: frame; action; state_valence; state_stress; state_task
+@dataclass(frozen=True)
+class ActuationView: decision; called; response; frame_goal
+@dataclass(frozen=True)
+class ReplyView: frame; text; reply_class
+
+def classify_reaction(trace, *, escape_hatch=False) -> ReactionClass: ...
+def check_state(view, invariants) -> tuple[str, ...]: ...
+def check_intent(view, invariants) -> tuple[str, ...]: ...
+def check_actuation(view, invariants) -> tuple[str, ...]: ...
+def check_reply(view, invariants) -> tuple[str, ...]: ...
+def intent_from_state(view, action) -> IntentView: ...
+def classify_reply(text, frame) -> str: ...
+
+@dataclass(frozen=True)
+class Scenario: id; link; preset; seed; ticks; messages; expect_reaction;
+    state_invariants; intent_invariants; actuation_invariants; reply_invariants;
+    precondition
+@dataclass(frozen=True)
+class ScenarioResult: scenario; reactions; violations; intent_violations;
+    actuation_violations; reply_violations; passed; reason
+
+def default_scenarios() -> tuple[Scenario, ...]: ...
+def summarize(results) -> Mapping[str, object]: ...
+
+class BehavioralChainRunner:
+    def __init__(self, *, workdir=None, llm=None) -> None: ...
+    def run(self, scenario) -> ScenarioResult: ...
+    def run_all(self, scenarios=None) -> list[ScenarioResult]: ...
+    def run_ablation(self, check) -> AblationResult: ...
+    def run_ablations(self, checks=None) -> list[AblationResult]: ...
+
+@dataclass(frozen=True)
+class RecordingLlmClient:  # delegates to FakeLlmClient, records calls
+    def reply(self, messages, max_tokens=256) -> str: ...
+    @property
+    def calls(self) -> tuple[list[dict], ...]: ...
+```
+
+`BehavioralChainRunner` (Shell) прогоняет `HostLoop` с детерминированными
+ручками (preset + synthetic clock + fake embedder + `DeterministicMeter`),
+ведёт policy вручную (без LLM — ADR-0007). Звено 4: при решении «говорить»
+вызывается `SpeechController.respond(decision=...)` через `RecordingLlmClient`
+(LLM вызван только тогда); звено 5: `classify_reply` извлекает класс ответа и
+сверяется с `frame.goal`. При `policy.enabled=False` решения не принимаются
+(ablation). Абсолютные значения не проверяются — только инварианты.
+
+## Fidelity harness (behavioral_chain.py, VALIDATION §7.6)
+
+Проверяет **преобразователь** (LLM), а не хост: сохранение сигнала, а не
+«нейтральность». Абсолютные значения не проверяемы — проверяется **порядок**.
+
+```python
+class ToneAxis(Enum): VALENCE; STRESS; GOAL_SCOPE
+class DistortionClass(Enum): NONE; MASKING; INVERSION; FABRICATION
+class ToneScorer(Protocol):
+    def score(self, text: str, axis: ToneAxis) -> float: ...
+
+@dataclass(frozen=True)
+class LexiconToneScorer:  # deterministic polarity lexicon (CI baseline)
+    def score(self, text, axis) -> float: ...
+
+@dataclass(frozen=True)
+class EmbeddingToneScorer:  # opt-in: anchors + Embedder
+    embedder: Embedder
+    def score(self, text, axis) -> float: ...
+
+@dataclass(frozen=True)
+class FidelityPair: id; frame_a; frame_b; axis; expect_ordered
+@dataclass(frozen=True)
+class FidelityResult: pair; score_a; score_b; ordered; distortion; passed; reason
+
+def check_fidelity(pair, *, scorer) -> FidelityResult: ...
+
+class FidelityHarness:
+    def __init__(self, responder, *, scorer=None) -> None: ...
+    def run(self, pair) -> FidelityResult: ...
+    def run_all(self, pairs=None) -> list[FidelityResult]: ...
+```
+
+Классы искажения: маскирование (сигнал не читается), инверсия (знак
+перевёрнут), фабрикация (сигнал добавлен). CI — детерминированный responder +
+`LexiconToneScorer`; реальная LLM/эмбеддеры — opt-in. LLM-as-judge для ворот не
+используется (ADR-0007).
+
 ## Инварианты
 
 1. `dt > 0`; decay/интегралы в секундах.
