@@ -7,7 +7,7 @@
 Сквозные документы (не принадлежат модулю):
 - [`CONSTITUTION.md`](CONSTITUTION.md) — правила проекта
 - [`host_architecture_manifest.md`](host_architecture_manifest.md) — архитектура (что строим)
-- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S7
+- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S8
 - [`VALIDATION.md`](VALIDATION.md) — проверка и ворота
 - [`BACKLOG.md`](BACKLOG.md) — задачи
 - [`adr/`](adr/) — Architecture Decision Records (0001–0011)
@@ -40,12 +40,16 @@
 | `host/probes` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/behavioral_chain` | — | — | — | ✅ реализовано: звенья 1–5 + ablation + fidelity + предусловия | VALIDATION §7 |
 | `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
+| `core/actuation` | — | — | — | ✗ не начато (S8) | S8 |
+| `host/executor` | — | — | — | ✗ не начато (S8) | S8 |
+| `config/actuation` | — | — | — | ✗ не начато (S8) | S8 |
 | `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1061) | все |
 
 SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,
 `stages/S7_HITL_PROTOCOL.md` (предыдущие — `stages/S5_SPEC.md`,
-`stages/S5_PLAN.md`).
+`stages/S5_PLAN.md`); запланированный спринт — `stages/ACTUATION_PLAN.md`
+(секвенирование актуаций, S8, не начато).
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
@@ -59,7 +63,9 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 узнавание/тайминг/ToM→policy, Vigilance, имена, Joint Agency) → `S6` автономия
 🟡 (проход 1: selfcontrol, консолидация, EXPLORE, факторизация; проход 2 ✅:
 длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✅
-(harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010).
+(harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010) → `S8` секвенирование
+актуаций ✗ запланировано (executive, BT, async, MCP-действие;
+`stages/ACTUATION_PLAN.md`).
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).
 

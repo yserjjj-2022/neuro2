@@ -5,7 +5,7 @@
 ## Навигация по проекту
 
 - [`INTENT.md`](INTENT.md) — зачем проект: выращивание, а не программирование
-- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S7, ворота
+- [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S8, ворота
 - [`VALIDATION.md`](VALIDATION.md) — проверка, сценарии, инварианты
 - [`SPECS.md`](SPECS.md) — реестр модульных спецификаций
 - [`CONSTITUTION.md`](CONSTITUTION.md) — правила проекта
@@ -13,6 +13,7 @@
 - [`BACKLOG.md`](BACKLOG.md) — задачи по стадиям
 - [`adr/`](adr/) — Architecture Decision Records
 - [`stages/`](stages/) — SPEC/PLAN по стадиям сборки
+  (запланированный спринт — [`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md), S8)
 
 ## Установка
 
@@ -77,8 +78,12 @@ critical slowing down, протокол сброса), консолидация 
 `stages/S7_HITL_PROTOCOL.md` (ADR-0010). **Реестр интеграций + MCP-транспорт
 реализован** (ADR-0011): каталог подключений (Python-база + TOML-override) +
 реальные MCP-серверы (stdio) вместо mock-зондирования, флаг `--integrations PATH`.
-931 тестов.
+1061 тест.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
+
+**Запланировано:** `S8` секвенирование актуаций (executive-слой, Behavior Tree,
+асинхронность, MCP как действие) — [`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md),
+не начато.
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
 программирование поведения.
@@ -117,8 +122,11 @@ uv run python -m src --diagnose --diagnose-log diag.jsonl   # дерево пр�
 `--preset-file configs/*.toml` (fail-fast override). `--diagnose` ведёт пробу →
 snapshot → категориальный вердикт → ветвление; `--probes FILE` переопределяет
 дерево. `--behavioral [--behavioral-precondition born|primed|matured]
-[--behavioral-json PATH]` прогоняет поведенческий автотест (§7) и печатает
-сводку (в JSON — машинный отчёт). Операторский протокол —
+[--behavioral-json PATH] [--behavioral-baseline PATH]
+[--behavioral-save-baseline PATH] [--behavioral-band F]` прогоняет поведенческий
+автотест (§7) и печатает сводку (в JSON — машинный отчёт); эталон наблюдаемых
+сохраняется (`--behavioral-save-baseline`) и сравнивается по полосе
+(`--behavioral-baseline`/`--behavioral-band`). Операторский протокол —
 `stages/S7_HITL_PROTOCOL.md`.
 
 ## Лицензия

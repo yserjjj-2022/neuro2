@@ -3,7 +3,7 @@
 > **On build order and validation.** This document describes the *technical
 > subsystems* (what we build). For *build order, control gates and behavioral
 > validation* see:
-> - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — stages S1–S7, manifest/code
+> - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — stages S1–S8, manifest/code
 >   conflicts and their resolution;
 > - [`VALIDATION.md`](VALIDATION.md) — validation levels, canonical scenarios,
 >   organism invariants, gates, regression;
