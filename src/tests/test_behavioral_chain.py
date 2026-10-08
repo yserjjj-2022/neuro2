@@ -22,6 +22,8 @@ from src.host.behavioral_chain import (
     IntentInvariant,
     IntentView,
     LexiconToneScorer,
+    Precondition,
+    PreconditionKind,
     ReactionClass,
     RecordingLlmClient,
     ReplyClass,
@@ -242,10 +244,89 @@ class TestScenario:
         with pytest.raises(ValueError):
             Scenario(id="x", link="state", preset="baseline", ticks=0)
 
-    def test_non_born_precondition_raises(self) -> None:
-        """primed/matured ещё не реализованы (VALIDATION §7.8)."""
+    def test_primed_without_measured_message_raises(self) -> None:
+        """primed(n) без сообщения после прогрева не декларируется (§7.8)."""
         with pytest.raises(ValueError):
-            Scenario(id="x", link="state", preset="baseline", precondition="primed")
+            Scenario(
+                id="x",
+                link="state",
+                preset="dialogue",
+                messages=((0, "a"),),
+                precondition=Precondition.primed(1),
+            )
+
+    def test_measure_from_born_is_zero(self) -> None:
+        assert (
+            Scenario(id="x", link="state", preset="baseline").measure_from() == 0
+        )
+
+    def test_measure_from_matured_is_zero(self) -> None:
+        scenario = Scenario(
+            id="x",
+            link="state",
+            preset="long-horizon",
+            ticks=300,
+            precondition=Precondition.matured(),
+        )
+        assert scenario.measure_from() == 0
+
+    def test_measure_from_primed_is_next_message(self) -> None:
+        """Первые n сообщений — прогрев; замер с (n+1)-го (§7.8)."""
+        scenario = Scenario(
+            id="x",
+            link="state",
+            preset="dialogue",
+            messages=((0, "a"), (40, "b"), (80, "c")),
+            precondition=Precondition.primed(2),
+        )
+        assert scenario.measure_from() == 80
+
+
+class TestPrecondition:
+    """Предусловия born/primed/matured (Core; VALIDATION §7.8)."""
+
+    def test_born_default(self) -> None:
+        pre = Precondition.born()
+        assert pre.kind is PreconditionKind.BORN
+        assert pre.warmup == 0
+        assert str(pre) == "born"
+
+    def test_primed_carries_warmup(self) -> None:
+        pre = Precondition.primed(3)
+        assert pre.kind is PreconditionKind.PRIMED
+        assert pre.warmup == 3
+        assert str(pre) == "primed(3)"
+
+    def test_matured(self) -> None:
+        pre = Precondition.matured()
+        assert pre.kind is PreconditionKind.MATURED
+        assert str(pre) == "matured"
+
+    def test_primed_requires_warmup(self) -> None:
+        with pytest.raises(ValueError):
+            Precondition.primed(0)
+
+    def test_negative_warmup_raises(self) -> None:
+        with pytest.raises(ValueError):
+            Precondition(kind=PreconditionKind.PRIMED, warmup=-1)
+
+    def test_warmup_outside_primed_raises(self) -> None:
+        with pytest.raises(ValueError):
+            Precondition(kind=PreconditionKind.BORN, warmup=2)
+        with pytest.raises(ValueError):
+            Precondition(kind=PreconditionKind.MATURED, warmup=1)
+
+    def test_applies_to_exact_kind(self) -> None:
+        assert Precondition.born().applies_to(Precondition.born())
+        assert not Precondition.born().applies_to(Precondition.matured())
+        assert Precondition.matured().applies_to(Precondition.matured())
+        assert not Precondition.matured().applies_to(Precondition.born())
+
+    def test_applies_to_primed_volume(self) -> None:
+        """primed(n) применим, если прогон даёт не меньше прогрева."""
+        assert Precondition.primed(1).applies_to(Precondition.primed(2))
+        assert Precondition.primed(2).applies_to(Precondition.primed(2))
+        assert not Precondition.primed(3).applies_to(Precondition.primed(2))
 
 
 class TestIntentRunner:
@@ -843,6 +924,62 @@ class TestBehavioralChainRunner:
     def test_run_all_default_corpus(self, tmp_path: Path) -> None:
         results = BehavioralChainRunner(workdir=tmp_path).run_all()
         assert len(results) == len(default_scenarios())
+        assert all(r.passed for r in results)
+
+
+class TestPreconditionRunner:
+    """Shell: фильтрация применимых и прогрев primed (VALIDATION §7.8)."""
+
+    def test_default_corpus_declares_all_preconditions(self) -> None:
+        kinds = {s.precondition.kind for s in default_scenarios()}
+        assert kinds == {
+            PreconditionKind.BORN,
+            PreconditionKind.PRIMED,
+            PreconditionKind.MATURED,
+        }
+
+    def test_born_run_selects_only_born(self, tmp_path: Path) -> None:
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        results = runner.run_all(precondition=Precondition.born())
+        assert results
+        assert all(
+            r.scenario.precondition.kind is PreconditionKind.BORN
+            for r in results
+        )
+        assert all(r.passed for r in results)
+
+    def test_primed_run_selects_primed(self, tmp_path: Path) -> None:
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        results = runner.run_all(precondition=Precondition.primed(1))
+        assert results
+        assert all(
+            r.scenario.precondition.kind is PreconditionKind.PRIMED
+            for r in results
+        )
+        assert all(r.passed for r in results)
+
+    def test_primed_warmup_excludes_early_ticks(self, tmp_path: Path) -> None:
+        """Прогрев не записывается: наблюдаемые только с измеряемого тика."""
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        scenario = Scenario(
+            id="primed.probe",
+            link="decision",
+            preset="dialogue",
+            ticks=120,
+            messages=((0, "a"), (40, "b")),
+            precondition=Precondition.primed(1),
+        )
+        result = runner.run(scenario)
+        assert len(result.reactions) == 120 - 40
+
+    def test_run_matured_only_matured(self, tmp_path: Path) -> None:
+        runner = BehavioralChainRunner(workdir=tmp_path)
+        results = runner.run_matured()
+        assert results
+        assert all(
+            r.scenario.precondition.kind is PreconditionKind.MATURED
+            for r in results
+        )
         assert all(r.passed for r in results)
 
 

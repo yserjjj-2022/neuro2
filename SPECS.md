@@ -38,9 +38,9 @@
 | `host/sensitivity` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/diagnostic` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/probes` | — | — | — | ✅ реализовано (S7) | S7 |
-| `host/behavioral_chain` | — | — | — | ✅ реализовано: звенья 1–5 + ablation + fidelity | VALIDATION §7 |
+| `host/behavioral_chain` | — | — | — | ✅ реализовано: звенья 1–5 + ablation + fidelity + предусловия | VALIDATION §7 |
 | `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1021) | все |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1037) | все |
 
 SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,

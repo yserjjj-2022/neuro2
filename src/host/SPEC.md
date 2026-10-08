@@ -393,6 +393,18 @@ class IntentInvariant(Enum): GOAL_CONSISTENT; AFFECT_CONSISTENT; TASK_CONSISTENT
 class ActuationInvariant(Enum): LLM_CALLED_IFF_SPEAK; RESPONSE_RETURNED; FRAME_GROUNDED
 class ReplyInvariant(Enum): CLASS_MATCHES_GOAL; NONEMPTY
 class ReplyClass(Enum): STATEMENT; QUESTION; EMPTY
+class PreconditionKind(Enum): BORN; PRIMED; MATURED
+
+@dataclass(frozen=True)
+class Precondition:  # VALIDATION §7.8
+    kind: PreconditionKind; warmup: int
+    @classmethod
+    def born(cls) -> Precondition: ...
+    @classmethod
+    def primed(cls, warmup: int) -> Precondition: ...
+    @classmethod
+    def matured(cls) -> Precondition: ...
+    def applies_to(self, run: Precondition) -> bool: ...
 
 @dataclass(frozen=True)
 class StateView: tick; f; valence; stress; gamma; task; active_columns; drift;
@@ -426,7 +438,8 @@ def summarize(results) -> Mapping[str, object]: ...
 class BehavioralChainRunner:
     def __init__(self, *, workdir=None, llm=None) -> None: ...
     def run(self, scenario) -> ScenarioResult: ...
-    def run_all(self, scenarios=None) -> list[ScenarioResult]: ...
+    def run_all(self, scenarios=None, *, precondition=None) -> list[ScenarioResult]: ...
+    def run_matured(self, scenarios=None) -> list[ScenarioResult]: ...
     def run_ablation(self, check) -> AblationResult: ...
     def run_ablations(self, checks=None) -> list[AblationResult]: ...
 
@@ -444,6 +457,17 @@ class RecordingLlmClient:  # delegates to FakeLlmClient, records calls
 (LLM вызван только тогда); звено 5: `classify_reply` извлекает класс ответа и
 сверяется с `frame.goal`. При `policy.enabled=False` решения не принимаются
 (ablation). Абсолютные значения не проверяются — только инварианты.
+
+**Предусловия (VALIDATION §7.8).** Сценарий декларирует объём истории:
+`Precondition.born()` (с нуля — ворота), `Precondition.primed(n)` (прогрев N
+сообщений в том же прогоне) и `Precondition.matured()` (длинный прогон,
+`long-horizon`). Для `primed(n)` первые N сообщений — прогрев: loop
+прогоняется (история копится), но наблюдаемые не записываются, замер
+начинается с тика следующего сообщения. `run_all(precondition=...)` оставляет
+только применимые сценарии (`Precondition.applies_to`), `run_matured` — вход
+длинного прогона. Предусловие — **формат прогона**, а не объект проверки:
+`born/primed` проверяют исправность канала, накопление (узнавание/recall/дрейф)
+— накопительный harness mature-уровня (§7.8).
 
 ## Fidelity harness (behavioral_chain.py, VALIDATION §7.6)
 

@@ -39,6 +39,8 @@ Functional Core (pure, ADR-0004):
   — actuation invariants (link 4).
 * :class:`ReplyInvariant` / :class:`ReplyClass` / :class:`ReplyView` /
   :func:`classify_reply` / :func:`check_reply` — reply structure (link 5).
+* :class:`PreconditionKind` / :class:`Precondition` — how much history a
+  scenario needs (``born``/``primed(n)``/``matured``; VALIDATION §7.8).
 * :class:`Scenario` / :class:`ScenarioResult` — one test cell and its outcome.
 * :class:`Ablation` / :class:`AblationCheck` / :class:`AblationResult` —
   attribution checks: disabling a mechanism must *change* the observable
@@ -56,14 +58,15 @@ Imperative Shell:
   driving policy itself (no LLM, ADR-0007), mirroring ``ChatSession``'s decision
   path. Link 4 routes speaking decisions through ``SpeechController.respond``
   with a ``RecordingLlmClient`` (deterministic fake LLM), so the call/no-call is
-  observable. Same seed → same result (VALIDATION §7.7).
+  observable. Same seed → same result (VALIDATION §7.7). Preconditions (VALIDATION
+  §7.8): ``run_all(precondition=...)`` keeps applicable scenarios and
+  ``run_matured`` is the long-horizon entry; ``primed(n)`` warms up the first n
+  messages before measurement.
 * :class:`RecordingLlmClient` — a fake LLM that records every call and returns a
   goal-structured deterministic reply.
 * :class:`FidelityHarness` — drives an injected responder over fidelity pairs.
 
-Not covered yet (by design): ToM (``partner`` is ``None`` → S4-compat) and
-preconditions ``primed``/``matured`` (only ``born`` is implemented;
-VALIDATION §7.8).
+Not covered yet (by design): ToM (``partner`` is ``None`` → S4-compat).
 """
 
 from __future__ import annotations
@@ -641,23 +644,117 @@ class FailingLlmClient:
         raise LlmError("deterministic failure")
 
 
+class PreconditionKind(Enum):
+    """Объём истории, при котором сценарий имеет смысл (VALIDATION §7.8).
+
+        BORN — с нуля (ворота, детерминизм);
+        PRIMED — прогрев N реплик в том же прогоне до замера;
+        MATURED — длинный прогон (отдельный harness, как C10).
+    """
+
+    BORN = "born"
+    PRIMED = "primed"
+    MATURED = "matured"
+
+
+@dataclass(frozen=True)
+class Precondition:
+    """Предусловие сценария: сколько истории нужно до замера (VALIDATION §7.8).
+
+    Сценарий декларирует объём истории, при котором он осмыслен; runner
+    выбирает применимые (:meth:`applies_to`). ``warmup`` задан только для
+    ``PRIMED`` — число прогревочных реплик.
+
+    Attributes:
+        kind: Вид предусловия.
+        warmup: Число прогревочных реплик (``PRIMED``; иначе 0).
+
+    Raises:
+        ValueError: Если ``warmup`` отрицателен, задан вне ``PRIMED`` или
+            ``PRIMED`` без прогрева.
+    """
+
+    kind: PreconditionKind = PreconditionKind.BORN
+    warmup: int = 0
+
+    def __post_init__(self) -> None:
+        if self.warmup < 0:
+            raise ValueError(f"warmup must be >= 0, got {self.warmup}")
+        if self.kind is PreconditionKind.PRIMED:
+            if self.warmup < 1:
+                raise ValueError("primed precondition requires warmup >= 1")
+        elif self.warmup != 0:
+            raise ValueError(
+                f"warmup is only valid for primed, got {self.kind.value}"
+            )
+
+    @classmethod
+    def born(cls) -> Precondition:
+        """Предусловие «с нуля» (ворота, детерминизм)."""
+        return cls(PreconditionKind.BORN)
+
+    @classmethod
+    def primed(cls, warmup: int) -> Precondition:
+        """Предусловие с прогревом ``warmup`` реплик.
+
+        Args:
+            warmup: Число прогревочных реплик (>= 1).
+
+        Returns:
+            Предусловие ``PRIMED``.
+        """
+        return cls(PreconditionKind.PRIMED, warmup)
+
+    @classmethod
+    def matured(cls) -> Precondition:
+        """Предусловие длинного прогона (отдельный harness)."""
+        return cls(PreconditionKind.MATURED)
+
+    def applies_to(self, run: Precondition) -> bool:
+        """Применим ли сценарий при прогоне с предусловием ``run``.
+
+        Сценарий применим, если требуемый объём истории не превышает
+        предоставленный прогоном: ``born`` — только ``born``; ``primed(n)`` —
+        ``primed(m)`` при ``m >= n``; ``matured`` — только ``matured``.
+
+        Args:
+            run: Предусловие прогона.
+
+        Returns:
+            True, если сценарий можно запускать в этом прогоне.
+        """
+        if self.kind is not run.kind:
+            return False
+        if self.kind is PreconditionKind.PRIMED:
+            return run.warmup >= self.warmup
+        return True
+
+    def __str__(self) -> str:
+        """Человекочитаемая форма (``born`` | ``primed(n)`` | ``matured``)."""
+        if self.kind is PreconditionKind.PRIMED:
+            return f"primed({self.warmup})"
+        return self.kind.value
+
+
 @dataclass(frozen=True)
 class Scenario:
     """Одна ячейка поведенческого теста (сценарий → ожидаемый класс).
 
     Attributes:
         id: Идентификатор (например ``state.bounds.baseline``).
-        link: Проверяемое звено (``state`` | ``decision``).
+        link: Проверяемое звено (``state`` | ``decision`` | ``intent`` |
+            ``actuation`` | ``reply``).
         preset: Имя пресета (ручки заморожены).
         seed: Зерно детерминированных провайдеров.
         ticks: Число тиков прогона.
         messages: Скрипт сообщений ``(tick, text)``.
         expect_reaction: Ожидаемый класс реакции (None → не проверяется).
         state_invariants: Проверяемые инварианты состояния.
-        precondition: Предусловие (``born``; ``primed``/``matured`` — позже).
+        precondition: Предусловие объёма истории (VALIDATION §7.8).
 
     Raises:
-        ValueError: Если id/звено пусты, ticks < 1 или предусловие неизвестно.
+        ValueError: Если id/звено пусты, ticks < 1 или у ``primed(n)`` нет
+            измеряемого сообщения после прогрева.
     """
 
     id: str
@@ -673,7 +770,7 @@ class Scenario:
         _DEFAULT_ACTUATION_INVARIANTS
     )
     reply_invariants: tuple[ReplyInvariant, ...] = _DEFAULT_REPLY_INVARIANTS
-    precondition: str = "born"
+    precondition: Precondition = Precondition()
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -691,11 +788,27 @@ class Scenario:
             )
         if self.ticks < 1:
             raise ValueError(f"ticks must be >= 1, got {self.ticks}")
-        if self.precondition != "born":
+        if self.precondition.kind is PreconditionKind.PRIMED and (
+            len(self.messages) <= self.precondition.warmup
+        ):
             raise ValueError(
-                f"precondition {self.precondition!r} not implemented "
-                "(only 'born'; VALIDATION §7.8)"
+                f"primed({self.precondition.warmup}) scenario needs a measured "
+                f"message after warm-up, got {len(self.messages)} message(s)"
             )
+
+    def measure_from(self) -> int:
+        """Тик, с которого начинается замер (после прогрева; VALIDATION §7.8).
+
+        Для ``born``/``matured`` — 0; для ``primed(n)`` — тик (n+1)-го
+        сообщения (первые n сообщений — прогрев).
+
+        Returns:
+            Номер тика начала замера.
+        """
+        if self.precondition.kind is not PreconditionKind.PRIMED:
+            return 0
+        ticks = sorted(tick for tick, _ in self.messages)
+        return ticks[self.precondition.warmup]
 
 
 @dataclass(frozen=True)
@@ -813,11 +926,12 @@ class AblationResult:
 
 
 def default_scenarios() -> tuple[Scenario, ...]:
-    """Встроенный корпус сценариев звеньев 1–3 (VALIDATION §7.1).
+    """Встроенный корпус сценариев звеньев 1–5 + предусловия (VALIDATION §7).
 
     Returns:
-        Кортеж :class:`Scenario`. Сценарии, бессмысленные без истории, на
-        ``born`` не входят (VALIDATION §7.8).
+        Кортеж :class:`Scenario`. Сценарии, бессмысленные без истории,
+        объявляют ``primed``/``matured`` и на ``born`` не запускаются
+        (VALIDATION §7.8).
     """
     return (
         Scenario(
@@ -878,6 +992,26 @@ def default_scenarios() -> tuple[Scenario, ...]:
             preset="dialogue",
             ticks=120,
             messages=((0, "привет"),),
+        ),
+        # Предусловие primed: первая реплика — прогрев, замер со второй.
+        # Это проверка формата прогона (исправность канала при ненулевой
+        # истории), а не объекта накопления: узнавание/recall — mature-harness
+        # (VALIDATION §7.8).
+        Scenario(
+            id="precondition.primed.state",
+            link="state",
+            preset="dialogue",
+            ticks=120,
+            messages=((0, "привет"), (60, "это снова я")),
+            precondition=Precondition.primed(1),
+        ),
+        # Предусловие matured: длинный прогон (long-horizon), отдельный harness.
+        Scenario(
+            id="precondition.matured.long_horizon",
+            link="state",
+            preset="long-horizon",
+            ticks=1500,
+            precondition=Precondition.matured(),
         ),
     )
 
@@ -1002,9 +1136,32 @@ class BehavioralChainRunner:
         )
 
     def run_all(
-        self, scenarios: Sequence[Scenario] | None = None
+        self,
+        scenarios: Sequence[Scenario] | None = None,
+        *,
+        precondition: Precondition | None = None,
     ) -> list[ScenarioResult]:
         """Прогнать корпус сценариев (по умолчанию — встроенный).
+
+        Args:
+            scenarios: Сценарии (None → :func:`default_scenarios`).
+            precondition: Если задано, оставить только сценарии, применимые к
+                этому предусловию (:meth:`Precondition.applies_to`; §7.8).
+
+        Returns:
+            Список :class:`ScenarioResult` в порядке сценариев.
+        """
+        corpus = default_scenarios() if scenarios is None else scenarios
+        if precondition is not None:
+            corpus = [
+                s for s in corpus if s.precondition.applies_to(precondition)
+            ]
+        return [self.run(scenario) for scenario in corpus]
+
+    def run_matured(
+        self, scenarios: Sequence[Scenario] | None = None
+    ) -> list[ScenarioResult]:
+        """Отдельный длинный прогон: только ``matured``-сценарии (§7.8).
 
         Args:
             scenarios: Сценарии (None → :func:`default_scenarios`).
@@ -1012,8 +1169,7 @@ class BehavioralChainRunner:
         Returns:
             Список :class:`ScenarioResult` в порядке сценариев.
         """
-        corpus = default_scenarios() if scenarios is None else scenarios
-        return [self.run(scenario) for scenario in corpus]
+        return self.run_all(scenarios, precondition=Precondition.matured())
 
     def run_ablation(self, check: AblationCheck) -> AblationResult:
         """Проверить атрибуцию: выключить механизм → наблюдаемое меняется.
@@ -1136,9 +1292,13 @@ class BehavioralChainRunner:
             :class:`_Observables` по всем звеньям.
         """
         message_ticks = {tick for tick, _ in scenario.messages}
+        measure_from = scenario.measure_from()
         obs = _Observables()
         for tick in range(scenario.ticks):
             loop.step_once(tick)
+            # Прогрев (primed): loop и policy прогоняются, история копится, но
+            # наблюдаемые не записываются до начала замера (VALIDATION §7.8).
+            measuring = tick >= measure_from
             action: Action | None = None
             if config.policy.enabled:
                 has_new_message = tick in message_ticks
@@ -1150,19 +1310,25 @@ class BehavioralChainRunner:
                 action = trace.chosen
                 if trace.chosen in _SPEAKING:
                     loop.mark_spoke()
-                obs.reactions.append(
-                    classify_reaction(trace, escape_hatch=loop.escape_hatch_active)
-                )
-                obs.policy_events += 1
+                if measuring:
+                    obs.reactions.append(
+                        classify_reaction(
+                            trace, escape_hatch=loop.escape_hatch_active
+                        )
+                    )
+                    obs.policy_events += 1
                 BehavioralChainRunner._drive_actuation(
-                    loop, scenario, controller, llm, trace, action, obs
+                    loop, scenario, controller, llm, trace, action, obs, measuring
                 )
-            view = _take_view(loop)
-            obs.violations.extend(check_state(view, scenario.state_invariants))
-            intent_view = intent_from_state(view, action)
-            obs.intent_violations.extend(
-                check_intent(intent_view, scenario.intent_invariants)
-            )
+            if measuring:
+                view = _take_view(loop)
+                obs.violations.extend(
+                    check_state(view, scenario.state_invariants)
+                )
+                intent_view = intent_from_state(view, action)
+                obs.intent_violations.extend(
+                    check_intent(intent_view, scenario.intent_invariants)
+                )
         return obs
 
     @staticmethod
@@ -1174,6 +1340,7 @@ class BehavioralChainRunner:
         trace: PolicyTrace,
         action: Action | None,
         obs: _Observables,
+        observe: bool = True,
     ) -> None:
         """Звенья 4–5: маршрутизировать реплику и проверить её форму.
 
@@ -1186,13 +1353,13 @@ class BehavioralChainRunner:
 
         Args:
             loop: Host loop.
-            config: Конфиг прогона.
             scenario: Сценарий.
             controller: Контроллер речи.
             llm: LLM-клиент прогона (для чтения факта вызова).
             trace: Трасса решения policy.
             action: Решение policy (None → S3-фолбэк).
             obs: Аккумулятор наблюдаемых.
+            observe: Записывать ли наблюдаемые (False — прогрев; §7.8).
         """
         view = _take_view(loop)
         goal = goal_for_action(action) if action is not None else "respond"
@@ -1234,12 +1401,13 @@ class BehavioralChainRunner:
             action=action,
             escape_hatch=escape,
         )
-        obs.actuation_violations.extend(
-            check_actuation(actuation_view, scenario.actuation_invariants)
-        )
-        obs.llm_calls += 1 if called else 0
+        if observe:
+            obs.actuation_violations.extend(
+                check_actuation(actuation_view, scenario.actuation_invariants)
+            )
+            obs.llm_calls += 1 if called else 0
 
-        if response is not None:
+        if response is not None and observe:
             frame = build_intent_frame(
                 f=view.f,
                 valence=view.valence,
