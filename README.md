@@ -108,6 +108,7 @@ reasoning у модели (по умолчанию выкл); `--status` печ�
 
 ```bash
 uv run python -m src --sensitivity                      # матрица ручек → инварианты
+uv run python -m src --behavioral                       # поведенческий автотест по звеньям
 uv run python -m src --preset dialogue --ticks 200      # именованный пресет
 uv run python -m src --diagnose --diagnose-log diag.jsonl   # дерево проб S3–S6
 ```
@@ -115,7 +116,10 @@ uv run python -m src --diagnose --diagnose-log diag.jsonl   # дерево пр�
 `--preset baseline|stress|dialogue|autonomy|long-horizon|cooperative` +
 `--preset-file configs/*.toml` (fail-fast override). `--diagnose` ведёт пробу →
 snapshot → категориальный вердикт → ветвление; `--probes FILE` переопределяет
-дерево. Операторский протокол — `stages/S7_HITL_PROTOCOL.md`.
+дерево. `--behavioral [--behavioral-precondition born|primed|matured]
+[--behavioral-json PATH]` прогоняет поведенческий автотест (§7) и печатает
+сводку (в JSON — машинный отчёт). Операторский протокол —
+`stages/S7_HITL_PROTOCOL.md`.
 
 ## Лицензия
 

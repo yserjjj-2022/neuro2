@@ -42,6 +42,8 @@ Functional Core (pure, ADR-0004):
 * :class:`PreconditionKind` / :class:`Precondition` — how much history a
   scenario needs (``born``/``primed(n)``/``matured``; VALIDATION §7.8).
 * :class:`Scenario` / :class:`ScenarioResult` — one test cell and its outcome.
+* :func:`summarize` / :func:`result_dict` / :func:`report_dict` — a serializable
+  run report (CLI ``--behavioral`` / JSON).
 * :class:`Ablation` / :class:`AblationCheck` / :class:`AblationResult` —
   attribution checks: disabling a mechanism must *change* the observable
   (VALIDATION §7.5). Non-tautological: if nothing changes, the test was about
@@ -1604,6 +1606,55 @@ def summarize(results: Sequence[ScenarioResult]) -> Mapping[str, object]:
         "passed": len(results) - len(failed),
         "failed": len(failed),
         "failed_ids": tuple(r.scenario.id for r in failed),
+    }
+
+
+def result_dict(result: ScenarioResult) -> dict[str, Any]:
+    """Сериализуемый снимок результата сценария (чистая).
+
+    Args:
+        result: Результат прогона.
+
+    Returns:
+        Словарь с id/звеном/предусловием, вердиктом, наблюдаемыми и причинами.
+    """
+    return {
+        "id": result.scenario.id,
+        "link": result.scenario.link,
+        "preset": result.scenario.preset,
+        "precondition": str(result.scenario.precondition),
+        "passed": result.passed,
+        "reason": result.reason,
+        "reactions": [reaction.value for reaction in result.reactions],
+        "llm_calls": result.llm_calls,
+        "state_violations": list(result.violations),
+        "intent_violations": list(result.intent_violations),
+        "actuation_violations": list(result.actuation_violations),
+        "reply_violations": list(result.reply_violations),
+    }
+
+
+def report_dict(results: Sequence[ScenarioResult]) -> dict[str, Any]:
+    """Сериализуемый отчёт прогона: сводка + по сценариям (чистая).
+
+    Форма отчёта для CLI (`--behavioral-json`) и будущего визуализатора;
+    JSON-совместим (без tuple/Enum).
+
+    Args:
+        results: Результаты прогонов.
+
+    Returns:
+        ``{"summary": {...}, "scenarios": [...]}``.
+    """
+    summary = summarize(results)
+    return {
+        "summary": {
+            "total": summary["total"],
+            "passed": summary["passed"],
+            "failed": summary["failed"],
+            "failed_ids": list(summary["failed_ids"]),  # type: ignore[arg-type]
+        },
+        "scenarios": [result_dict(result) for result in results],
     }
 
 

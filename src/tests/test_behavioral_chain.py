@@ -45,6 +45,8 @@ from src.host.behavioral_chain import (
     default_scenarios,
     intent_from_state,
     llm_responder,
+    report_dict,
+    result_dict,
     summarize,
 )
 from src.speech.controller import SpeechDecision
@@ -865,6 +867,106 @@ class TestSummarize:
         assert summary["passed"] == 1
         assert summary["failed"] == 1
         assert summary["failed_ids"] == ("b",)
+
+
+class TestReport:
+    """Сериализуемый отчёт прогона (Core; CLI/JSON)."""
+
+    def test_result_dict_fields(self) -> None:
+        result = _result("a", passed=True)
+        data = result_dict(result)
+        assert data["id"] == "a"
+        assert data["passed"] is True
+        assert data["precondition"] == "born"
+        assert data["reactions"] == []
+        assert data["state_violations"] == []
+
+    def test_report_dict_summary_and_scenarios(self) -> None:
+        ok = _result("a", passed=True)
+        bad = _result("b", passed=False)
+        report = report_dict([ok, bad])
+        assert report["summary"]["total"] == 2
+        assert report["summary"]["failed_ids"] == ["b"]
+        assert [s["id"] for s in report["scenarios"]] == ["a", "b"]
+
+    def test_report_dict_is_json_serializable(self) -> None:
+        import json
+
+        report = report_dict([_result("a", passed=False)])
+        text = json.dumps(report, ensure_ascii=False)
+        assert '"failed_ids": ["a"]' in text
+
+
+class TestBehavioralCli:
+    """CLI-вход b-теста (S7; --behavioral)."""
+
+    def test_format_reactions_counts(self) -> None:
+        from src.__main__ import _format_reactions
+
+        reactions = (
+            ReactionClass.SILENT,
+            ReactionClass.SILENT,
+            ReactionClass.RESPOND,
+        )
+        assert _format_reactions(reactions) == "respond×1, silent×2"
+
+    def test_format_reactions_empty(self) -> None:
+        from src.__main__ import _format_reactions
+
+        assert _format_reactions(()) == "-"
+
+    def test_parse_args_defaults(self) -> None:
+        from src.__main__ import _parse_args
+
+        args = _parse_args([])
+        assert args.behavioral is False
+        assert args.behavioral_precondition is None
+        assert args.behavioral_warmup == 1
+        assert args.behavioral_json is None
+
+    def test_parse_args_flags(self) -> None:
+        from src.__main__ import _parse_args
+
+        args = _parse_args(
+            [
+                "--behavioral",
+                "--behavioral-precondition",
+                "primed",
+                "--behavioral-warmup",
+                "3",
+                "--behavioral-json",
+                "out.json",
+            ]
+        )
+        assert args.behavioral is True
+        assert args.behavioral_precondition == "primed"
+        assert args.behavioral_warmup == 3
+        assert args.behavioral_json == Path("out.json")
+
+    def test_run_behavioral_writes_json_and_passes(self, tmp_path: Path) -> None:
+        """CLI-прогон born-корпуса: код 0 и сериализуемый отчёт."""
+        import json
+
+        from src.__main__ import _parse_args, _run_behavioral
+
+        report_path = tmp_path / "report.json"
+        args = _parse_args(
+            [
+                "--behavioral",
+                "--behavioral-precondition",
+                "born",
+                "--behavioral-json",
+                str(report_path),
+            ]
+        )
+        code = _run_behavioral(args)
+        assert code == 0
+        report = json.loads(report_path.read_text())
+        assert report["summary"]["failed"] == 0
+        assert report["scenarios"]
+        assert all(
+            s["precondition"] == "born" for s in report["scenarios"]
+        )
 
 
 class TestBehavioralChainRunner:

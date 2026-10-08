@@ -7,10 +7,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import signal
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
@@ -34,6 +36,9 @@ from src.speech import (
     llm_settings_from_env,
 )
 from src.tm import JointAgency, PartnerModel, VigilanceGate
+
+if TYPE_CHECKING:
+    from src.host.behavioral_chain import ReactionClass
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +233,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Тиков на прогон в sensitivity-harness. По умолчанию 120.",
     )
     parser.add_argument(
+        "--behavioral",
+        action="store_true",
+        help="Прогнать поведенческий автотест по звеньям (VALIDATION §7).",
+    )
+    parser.add_argument(
+        "--behavioral-precondition",
+        choices=("born", "primed", "matured"),
+        default=None,
+        help="Предусловие прогона b-теста (None → все сценарии).",
+    )
+    parser.add_argument(
+        "--behavioral-warmup",
+        type=int,
+        default=1,
+        help="Число прогревочных реплик для primed-предусловия. По умолчанию 1.",
+    )
+    parser.add_argument(
+        "--behavioral-json",
+        type=Path,
+        default=None,
+        help="Путь для JSON-отчёта b-теста (None → без файла).",
+    )
+    parser.add_argument(
         "--diagnose",
         action="store_true",
         help="Запустить диагностическую сессию (дерево проб, S7-C).",
@@ -278,6 +306,79 @@ def _run_sensitivity(args: argparse.Namespace) -> int:
         )
     print("sensitivity: all invariants hold" if ok else "sensitivity: FAILURES")
     return 0 if ok else 1
+
+
+def _format_reactions(reactions: tuple[ReactionClass, ...]) -> str:
+    """Сжать классы реакций в счётчики (для читаемой строки отчёта).
+
+    Args:
+        reactions: Классы реакций по тикам.
+
+    Returns:
+        Строка вида ``silent×115, initiative×5`` (или ``-`` при пустом вводе).
+    """
+    counts: dict[str, int] = {}
+    for reaction in reactions:
+        key = reaction.value
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return "-"
+    return ", ".join(
+        f"{name}×{count}" for name, count in sorted(counts.items())
+    )
+
+
+def _run_behavioral(args: argparse.Namespace) -> int:
+    """Прогнать поведенческий автотест по звеньям и напечатать отчёт (S7).
+
+    Args:
+        args: Аргументы CLI (behavioral_precondition, behavioral_warmup,
+            behavioral_json).
+
+    Returns:
+        Код выхода: 0, если провалов нет, иначе 1.
+    """
+    from src.host.behavioral_chain import (
+        BehavioralChainRunner,
+        Precondition,
+        PreconditionKind,
+        report_dict,
+        summarize,
+    )
+
+    precondition: Precondition | None = None
+    if args.behavioral_precondition is not None:
+        kind = PreconditionKind(args.behavioral_precondition)
+        precondition = (
+            Precondition.primed(args.behavioral_warmup)
+            if kind is PreconditionKind.PRIMED
+            else Precondition(kind=kind)
+        )
+
+    results = BehavioralChainRunner().run_all(precondition=precondition)
+    for result in results:
+        scenario = result.scenario
+        verdict = "OK" if result.passed else "FAIL"
+        reactions = _format_reactions(result.reactions)
+        print(
+            f"[{verdict}] {scenario.id} ({scenario.link}, {scenario.precondition}) "
+            f"reactions: {reactions} | llm={result.llm_calls}"
+        )
+        if not result.passed:
+            print(f"        reason: {result.reason}")
+
+    summary = summarize(results)
+    print(
+        f"behavioral: {summary['passed']}/{summary['total']} passed "
+        f"(failed={summary['failed_ids']})"
+    )
+    if args.behavioral_json is not None:
+        args.behavioral_json.write_text(
+            json.dumps(report_dict(results), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"behavioral: report written to {args.behavioral_json}")
+    return 0 if summary["failed"] == 0 else 1
 
 
 def _run_diagnose(args: argparse.Namespace) -> int:
@@ -461,6 +562,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.sensitivity:
         return _run_sensitivity(args)
+    if args.behavioral:
+        return _run_behavioral(args)
     if args.diagnose:
         return _run_diagnose(args)
     social = SocialConfig(enabled=not args.no_social)

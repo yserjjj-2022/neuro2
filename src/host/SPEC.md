@@ -434,6 +434,7 @@ class ScenarioResult: scenario; reactions; violations; intent_violations;
 
 def default_scenarios() -> tuple[Scenario, ...]: ...
 def summarize(results) -> Mapping[str, object]: ...
+def report_dict(results) -> dict[str, Any]: ...  # JSON-отчёт (summary + scenarios)
 
 class BehavioralChainRunner:
     def __init__(self, *, workdir=None, llm=None) -> None: ...
@@ -468,6 +469,13 @@ class RecordingLlmClient:  # delegates to FakeLlmClient, records calls
 длинного прогона. Предусловие — **формат прогона**, а не объект проверки:
 `born/primed` проверяют исправность канала, накопление (узнавание/recall/дрейф)
 — накопительный harness mature-уровня (§7.8).
+
+Два входа, как у sensitivity: pytest-гейт (`test_behavioral_chain.py`) и CLI
+`--behavioral [--behavioral-precondition born|primed|matured]
+[--behavioral-warmup N] [--behavioral-json PATH]` (ADR-0010 §7). CLI печатает
+построчную сводку (id, звено, предусловие, классы реакций, число LLM-вызовов,
+причина провала) + итог `summarize`, при `--behavioral-json` пишет `report_dict`
+(сериализуемый `{"summary", "scenarios"}`); код выхода 0 без провалов, иначе 1.
 
 ## Fidelity harness (behavioral_chain.py, VALIDATION §7.6)
 
