@@ -7,6 +7,12 @@ code written for it. Unknown options degrade to the epistemic default
 (``relevance``) is additive: with it, epistemic value is scaled by theme
 binding; without it, the default stands.
 
+Stage 2 adds **facts and conditions** ("default + enrichment"): a ``Fact`` is a
+named graded regularity of the world (value in [0, 1]); a ``Guard`` is a hard
+condition (gates, falsifiable) and a ``Regularity`` is a soft one (cost, a
+species disposition). ``evaluate_fact`` is total: an unknown fact degrades to
+``fact.default``.
+
 Functional Core / Imperative Shell (ADR-0004): identical inputs → identical
 ``OptionTrace``. The window order is the tie-break, so the whole run is a
 pure function of a memoized window snapshot.
@@ -18,12 +24,15 @@ from collections.abc import Mapping, Sequence
 
 from src.core.actuation.models import (
     ActuationPreferences,
+    Fact,
+    Guard,
     Option,
     OptionCandidate,
     OptionContext,
     OptionSource,
     OptionTrace,
     OptionWindow,
+    Regularity,
 )
 from src.mcp.probe import Affordance
 
@@ -164,4 +173,56 @@ def select_option(
         chosen=winner.option,
         reason=f"chose {winner.option.id}: {winner.reason}",
         candidates=tuple(candidates),
+    )
+
+
+def evaluate_fact(fact: Fact, state: Mapping[str, float]) -> float:
+    """Прочитать значение факта из снимка мира, тотально (чистая).
+
+    Неизвестный факт (нет ключа в ``state``) деградирует к ``fact.default``, а
+    не падает: кондишены определены для любого факта (инвариант SPEC). Значение
+    из ``state`` зажимается в [0, 1] — факт градуирован.
+
+    Args:
+        fact: Факт (несёт имя и дефолт).
+        state: Снимок мира ``имя → значение`` (измеряет Shell).
+
+    Returns:
+        Значение факта в [0, 1].
+    """
+    value = state.get(fact.name, fact.default)
+    return min(1.0, max(0.0, value))
+
+
+def guard_holds(guard: Guard, state: Mapping[str, float]) -> bool:
+    """Проверить жёсткий кондишен: ``fact >= threshold`` (чистая).
+
+    Args:
+        guard: Жёсткий кондишен (факт + порог).
+        state: Снимок мира.
+
+    Returns:
+        True, если факт достиг порога.
+    """
+    return evaluate_fact(guard.fact, state) >= guard.threshold
+
+
+def regularity_cost(
+    regularities: Sequence[Regularity], state: Mapping[str, float]
+) -> float:
+    """Стоимость от мягких кондишенов: ``Σ weight · fact`` (чистая).
+
+    Мягкое не гейтит, а удорожает действие (видовая склонность). При пустом
+    списке — ``0.0`` (дефолт без обогащения). Монотонна по фактам: веса ≥ 0.
+
+    Args:
+        regularities: Мягкие кондишены.
+        state: Снимок мира.
+
+    Returns:
+        Суммарная стоимость >= 0.
+    """
+    return sum(
+        regularity.weight * evaluate_fact(regularity.fact, state)
+        for regularity in regularities
     )

@@ -197,3 +197,87 @@ class OptionTrace:
     chosen: Option | None
     reason: str
     candidates: tuple[OptionCandidate, ...]
+
+
+# Нейтральное значение неизвестного факта (этап 2).
+DEFAULT_FACT_VALUE = 0.0
+
+
+@dataclass(frozen=True)
+class Fact:
+    """Именованная градуированная закономерность мира (этап 2).
+
+    Значение факта ∈ [0, 1] (0/1 = булево) живёт в ``state`` — снимке мира,
+    который измеряет Shell; ``Fact`` несёт лишь смысл и дефолт. Словарь фактов
+    **открыт**: новый факт вводится без правки типов.
+
+    Attributes:
+        name: Стабильное имя ("network_available") — ключ в ``state``.
+        default: Значение, если факт не измерен (деградация к дефолту).
+        description: Смысл факта — для трассы/аудита.
+    """
+
+    name: str
+    default: float = DEFAULT_FACT_VALUE
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        """Валидация: непустое имя, default в [0, 1].
+
+        Raises:
+            ValueError: Если имя пусто или default вне [0, 1].
+        """
+        if not self.name:
+            raise ValueError("fact name must not be empty")
+        if not 0.0 <= self.default <= 1.0:
+            raise ValueError(f"fact default must be in [0, 1], got {self.default}")
+
+
+@dataclass(frozen=True)
+class Guard:
+    """Жёсткий кондишен: закономерность мира, гейтящая действие (этап 2).
+
+    ``fact >= threshold`` → узел проходит. Опровержим против мира (тул
+    *действительно* требует сети?) — поэтому гейт, а не стоимость (ADR-0012).
+
+    Attributes:
+        fact: Проверяемый факт.
+        threshold: Порог в [0, 1].
+    """
+
+    fact: Fact
+    threshold: float
+
+    def __post_init__(self) -> None:
+        """Валидация: threshold в [0, 1].
+
+        Raises:
+            ValueError: Если threshold вне [0, 1].
+        """
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"threshold must be in [0, 1], got {self.threshold}")
+
+
+@dataclass(frozen=True)
+class Regularity:
+    """Мягкий кондишен: видовая склонность → стоимость, не гейт (этап 2).
+
+    Степень факта входит в стоимость действия (не запрещает). Не опровержим
+    против мира — это «сложилось так», поэтому стоимость (ADR-0012).
+
+    Attributes:
+        fact: Учитываемый факт.
+        weight: Вклад в стоимость, >= 0.
+    """
+
+    fact: Fact
+    weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Валидация: weight >= 0.
+
+        Raises:
+            ValueError: Если weight < 0.
+        """
+        if self.weight < 0.0:
+            raise ValueError(f"weight must be >= 0, got {self.weight}")

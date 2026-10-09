@@ -4,19 +4,30 @@ CMC (Canonical Microcircuits): L4 → L5/6 → L2/3 column dynamics.
 Voting: k-WTA lateral inhibition for column consensus.
 Attractors: multistable dynamics for task selection via short-term plasticity.
 Homeostasis: interoceptive setpoints and deviation (S4).
-Actuation: open option window over tools for goal selection (S8).
+Actuation: open option window over tools for goal selection (S8); facts and
+conditions (guard/regularity) for "default + enrichment" (S8 stage 2).
 Functional Core / Imperative Shell (ADR-0004) across all core/* modules.
 """
 
 from .actuation import (
+    DEFAULT_FACT_VALUE,
+    FACTS,
+    NETWORK_AVAILABLE,
+    TOPIC_BOUND,
     ActuationPreferences,
+    Fact,
+    Guard,
     Option,
     OptionCandidate,
     OptionContext,
     OptionSource,
     OptionTrace,
     OptionWindow,
+    Regularity,
     build_options,
+    evaluate_fact,
+    guard_holds,
+    regularity_cost,
     score_option,
     select_option,
 )
@@ -48,12 +59,18 @@ from .policy import (
 from .voting import VotingManager, VotingResult, kwta
 
 __all__ = [
+    "DEFAULT_FACT_VALUE",
+    "FACTS",
+    "NETWORK_AVAILABLE",
+    "TOPIC_BOUND",
     "Action",
     "ActuationPreferences",
     "CMCEnsemble",
     "ColumnConfig",
     "ColumnState",
     "EnsembleOutput",
+    "Fact",
+    "Guard",
     "HomeostasisState",
     "Homeostat",
     "HomeostaticSignal",
@@ -68,6 +85,7 @@ __all__ = [
     "PolicyContext",
     "PolicyTrace",
     "Preferences",
+    "Regularity",
     "Setpoint",
     "TaskAttraction",
     "TaskAttractor",
@@ -79,7 +97,10 @@ __all__ = [
     "column_step",
     "compute_dwell",
     "evaluate_candidates",
+    "evaluate_fact",
+    "guard_holds",
     "kwta",
+    "regularity_cost",
     "score_option",
     "select_action",
     "select_option",
