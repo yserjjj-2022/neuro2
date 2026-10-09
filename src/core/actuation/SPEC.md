@@ -9,9 +9,10 @@
 
 Спека покрывает **этап 1** (открытое окно опций, оценка и выбор — заменяющие
 нынешнее вырожденное правило `select_affordance` «первый обратимый»,
-`src/mcp/probe.py`) и **этап 2** (факты и кондишены «дефолт + обогащение»).
-Последующие этапы (эффекты/`Actuation`, BT, генератор) **расширят эту спеку**
-перед своим кодом — здесь они не описываются (см. «Границы»).
+`src/mcp/probe.py`), **этап 2** (факты и кондишены «дефолт + обогащение») и
+**этап 3** (эффекты, единый контракт актуации, классификация необратимости).
+Последующие этапы (BT, генератор) **расширят эту спеку** перед своим кодом —
+здесь они не описываются (см. «Границы»).
 
 Ключевое решение (ADR-0012): опции **не** перечисляются закрытым enum; окно
 порождается **в runtime** из доступных возможностей (встроенные + MCP-тулы).
@@ -199,6 +200,84 @@ gate/партнёра и отдаёт `Mapping[str, float]`); Core не тяне
 чистым. Категориальные факты (режим) в первую версию **не тащим** — только
 градуированные ∈ [0, 1].
 
+## Этап 3. Эффекты, контракт актуации, необратимость
+
+**Эффект — символьная дельта факта** (не данные): отвечает на вопрос генератора
+(этап 5) «достигает ли действие цели?». Данные-результат — это `ActuationResult`
+и маршрутизация в шину (Shell, этап 6); смешивать их с эффектом не нужно.
+
+**Обогащение опции аддитивно:** `Option.guard`/`Option.effect` — необязательные
+поля (дефолт `None`). Без них опция остаётся эпистемической (этап 1). Наличие
+`effect` даёт прагматическую ценность (действие, как известно, достигает факта).
+
+```python
+@dataclass(frozen=True)
+class Effect:
+    fact: Fact
+    value: float = 1.0          # целевое значение факта ∈ [0, 1]
+
+
+class ActuationKind(Enum):
+    SPEAK = "speak"
+    INVOKE_TOOL = "invoke_tool"
+
+
+class ActuationStatus(Enum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILURE = "failure"
+    PREEMPTED = "preempted"
+
+
+@dataclass(frozen=True)
+class Actuation:
+    kind: ActuationKind
+    goal: str                   # идентификатор цели/опции ("tool:get_weather")
+    payload: str = ""           # текст речи ИЛИ имя тула; аргументы — Shell
+
+
+@dataclass(frozen=True)
+class ActuationResult:
+    status: ActuationStatus
+    data: tuple[float, ...] = ()  # данные-результат → в шину (Shell, этап 6)
+
+
+@dataclass(frozen=True)
+class ToolAnnotations:
+    read_only_hint: bool = False
+    destructive_hint: bool = True    # консервативный дефолт (ADR-0012 §4)
+    idempotent_hint: bool = False
+    open_world_hint: bool = True
+
+
+def classify_reversible(annotations: ToolAnnotations, *, trusted: bool) -> bool: ...
+```
+
+### Правила (этап 3)
+
+- **`Effect`** — символьная дельта (`fact := value`), `value ∈ [0, 1]`. Только для
+  планирования; данные — не эффект.
+- **Обогащение:** `Option.guard: Guard | None`, `Option.effect: Effect | None`.
+  Аддитивно: без них опция оценивается как эпистемическая (совместимость).
+- **`classify_reversible`** — чистая классификация необратимости из аннотаций и
+  доверия источника:
+  - **недоверенный источник** (`trusted=False`) → всегда `False` (hint не
+    принимается как основание для автономии; аннотации — только подсказки,
+    ADR-0012 §4);
+  - **доверенный** (`trusted=True`) → `read_only_hint and not destructive_hint`.
+  - Core **не** знает `Provenance`: Shell транслирует `official → trusted=True`,
+    `community/local/нет → trusted=False`. Так `actuation` не импортирует
+    `integrations` (без цикла зависимостей, PLAN §Зависимости).
+- **`Actuation`/`ActuationResult`** — единый контракт «текст vs тул»: общий
+  статус, разный payload. Исполнение (эффекторы, gate, шина) — Shell (этап 6).
+
+### Границы этапа 3
+
+Только Core-контракт и чистая классификация. **Прокидка аннотаций** из
+`tools/list` → `ToolInfo` → `Affordance` → `Option` — **отдельный шаг** (правка
+`src/mcp/client.py`, риск транспорта). Здесь `ToolAnnotations` вводится как
+Core-тип, а `Affordance`/`select_affordance` не трогаются.
+
 ## Инварианты
 
 1. **FC/IS:** `build_options`/`score_option`/`select_option` — чистые;
@@ -219,6 +298,11 @@ gate/партнёра и отдаёт `Mapping[str, float]`); Core не тяне
    `fact.default`, не падает.
 9. **Монотонность (этап 2):** `regularity_cost` неубывает по каждому факту
    (веса ≥ 0).
+10. **Поза необратимости (этап 3):** `classify_reversible` по умолчанию
+    консервативна — недоверенный источник всегда `False`; обогащение может
+    только повысить права, не выдать их.
+11. **Аддитивность обогащения (этап 3):** `Option.guard`/`Option.effect` —
+    необязательны; без них оценка совместима с этапом 1.
 
 ## Критерии приёмки
 
@@ -243,6 +327,14 @@ gate/партнёра и отдаёт `Mapping[str, float]`); Core не тяне
 - [ ] неизвестный факт деградирует к `fact.default`, не падает
 - [ ] `ValueError` на некорректных входах
 
+**Этап 3:**
+- [ ] `Effect`/`Actuation`/`ActuationResult`/`ToolAnnotations` — frozen, с валидацией
+- [ ] `ActuationKind`/`ActuationStatus` — enum
+- [ ] `classify_reversible` — консервативный дефолт (недоверенный → `False`)
+- [ ] `Option.guard`/`Option.effect` — аддитивны, дефолт `None`
+- [ ] Core не импортирует `integrations` (trusted — от Shell)
+- [ ] `ValueError` на некорректных входах
+
 ## Границы (этапность)
 
 **Входит (этап 1):** окно, скорер, выбор, трасса — для тулов.
@@ -250,10 +342,13 @@ gate/партнёра и отдаёт `Mapping[str, float]`); Core не тяне
 **Входит (этап 2):** `Fact`/`Guard`/`Regularity`, `evaluate_fact`/`guard_holds`/
 `regularity_cost`, реестр `FACTS`.
 
+**Входит (этап 3):** `Effect`, `Actuation`/`ActuationResult`/`ActuationKind`/
+`ActuationStatus`, `ToolAnnotations`/`classify_reversible`, поля
+`Option.guard`/`Option.effect`.
+
 **НЕ входит (расширят спеку перед кодом):**
-- **этап 3+:** `Effect`, связывание фактов с опциями (`Option.guard`/`effect`),
-  `Actuation`/`ActuationResult` (единый контракт статуса);
 - **этап 4+:** `Node`/`Sequence`/`Fallback` (BT), `backward_chain` (генератор);
+- **прокидка аннотаций MCP** (`tools/list` → `ToolInfo` → `Affordance`) — отдельный шаг;
 - **встроенные речевые действия** в окне (стык с `core/policy`);
 - **исполнение** (эффекторы, executor, async, ожидание) — `host/executor`;
 - **привязка темы через эмбеддинги** (здесь — только поле `relevance`; эмбеддер — Shell);

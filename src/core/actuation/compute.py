@@ -13,6 +13,11 @@ condition (gates, falsifiable) and a ``Regularity`` is a soft one (cost, a
 species disposition). ``evaluate_fact`` is total: an unknown fact degrades to
 ``fact.default``.
 
+Stage 3 adds **effects and irreversibility as a stance**: ``Effect`` is a
+symbolic fact-delta (for planning); ``classify_reversible`` turns MCP
+annotations + source trust into reversibility, conservative by default (an
+untrusted source never grants autonomy).
+
 Functional Core / Imperative Shell (ADR-0004): identical inputs → identical
 ``OptionTrace``. The window order is the tie-break, so the whole run is a
 pure function of a memoized window snapshot.
@@ -33,6 +38,7 @@ from src.core.actuation.models import (
     OptionTrace,
     OptionWindow,
     Regularity,
+    ToolAnnotations,
 )
 from src.mcp.probe import Affordance
 
@@ -226,3 +232,25 @@ def regularity_cost(
         regularity.weight * evaluate_fact(regularity.fact, state)
         for regularity in regularities
     )
+
+
+def classify_reversible(annotations: ToolAnnotations, *, trusted: bool) -> bool:
+    """Классифицировать обратимость тула: поза, не факт (чистая).
+
+    Необратимость нельзя доказать — поэтому дефолт «необратимо», а обогащение
+    может только повысить права (ADR-0012 §4). Аннотации MCP — **подсказки**:
+    от недоверенного источника их нельзя принимать как основание для автономии.
+
+    Core не знает ``Provenance`` (без цикла зависимостей): Shell транслирует
+    ``official → trusted=True``, ``community/local/нет → trusted=False``.
+
+    Args:
+        annotations: MCP-аннотации тула (консервативные дефолты).
+        trusted: Доверенный ли источник (градуируется Shell из provenance).
+
+    Returns:
+        True, если тул можно считать обратимым (безопасным для автономии).
+    """
+    if not trusted:
+        return False
+    return annotations.read_only_hint and not annotations.destructive_hint

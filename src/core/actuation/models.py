@@ -37,6 +37,8 @@ class Option:
         reversible: Обратимость; консервативный дефолт False (ADR-0012 §4).
         cost: Стоимость/латентность (оценка, не замер), >= 0.
         relevance: Привязка темы [0, 1]; None → дефолт (без обогащения).
+        guard: Жёсткий кондишен (этап 3); None → без обогащения.
+        effect: Символьный эффект (этап 3); None → эпистемическая опция.
     """
 
     id: str
@@ -45,6 +47,8 @@ class Option:
     reversible: bool = False
     cost: float = 0.0
     relevance: float | None = None
+    guard: Guard | None = None
+    effect: Effect | None = None
 
     def __post_init__(self) -> None:
         """Валидация: непустой id, cost >= 0, relevance в [0, 1] или None.
@@ -281,3 +285,105 @@ class Regularity:
         """
         if self.weight < 0.0:
             raise ValueError(f"weight must be >= 0, got {self.weight}")
+
+
+@dataclass(frozen=True)
+class Effect:
+    """Символьный эффект действия: ``fact := value`` (этап 3).
+
+    Отвечает на вопрос генератора (этап 5) «достигает ли действие цели?».
+    Данные-результат — это ``ActuationResult`` (Shell, этап 6); смешивать их
+    с эффектом не нужно.
+
+    Attributes:
+        fact: Факт, который действие делает истинным.
+        value: Целевое значение факта ∈ [0, 1].
+    """
+
+    fact: Fact
+    value: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Валидация: value в [0, 1].
+
+        Raises:
+            ValueError: Если value вне [0, 1].
+        """
+        if not 0.0 <= self.value <= 1.0:
+            raise ValueError(f"effect value must be in [0, 1], got {self.value}")
+
+
+class ActuationKind(Enum):
+    """Вид актуации: речь или вызов тула (единый контракт, разный payload)."""
+
+    SPEAK = "speak"
+    INVOKE_TOOL = "invoke_tool"
+
+
+class ActuationStatus(Enum):
+    """Статус актуации (идиома ROS Action Server: goal/feedback/result/preempt)."""
+
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILURE = "failure"
+    PREEMPTED = "preempted"
+
+
+@dataclass(frozen=True)
+class Actuation:
+    """Единая актуация: цель + payload (текст речи ИЛИ имя тула).
+
+    Аргументы тула — забота Shell (мемоизация, этап 6), не Core.
+
+    Attributes:
+        kind: Вид актуации.
+        goal: Идентификатор цели/опции ("tool:get_weather").
+        payload: Текст речи или имя тула.
+    """
+
+    kind: ActuationKind
+    goal: str
+    payload: str = ""
+
+    def __post_init__(self) -> None:
+        """Валидация: непустая цель.
+
+        Raises:
+            ValueError: Если goal пуст.
+        """
+        if not self.goal:
+            raise ValueError("actuation goal must not be empty")
+
+
+@dataclass(frozen=True)
+class ActuationResult:
+    """Результат актуации: статус + данные (→ в шину, Shell этап 6).
+
+    Attributes:
+        status: Итоговый статус.
+        data: Данные-результат (пусто при Running/Failure/Preempted).
+    """
+
+    status: ActuationStatus
+    data: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class ToolAnnotations:
+    """MCP-аннотации тула с консервативными дефолтами (ADR-0012 §4).
+
+    Аннотации — только **подсказки**: недоверенный источник не даёт на их
+    основании автономии (см. ``classify_reversible``). Дефолты консервативны:
+    неаннотированный тул считается деструктивным и открытым миру.
+
+    Attributes:
+        read_only_hint: Тул только читает (дефолт False).
+        destructive_hint: Тул может разрушать (дефолт True — консервативно).
+        idempotent_hint: Повторный вызов безопасен (дефолт False).
+        open_world_hint: Тул взаимодействует с внешним миром (дефолт True).
+    """
+
+    read_only_hint: bool = False
+    destructive_hint: bool = True
+    idempotent_hint: bool = False
+    open_world_hint: bool = True

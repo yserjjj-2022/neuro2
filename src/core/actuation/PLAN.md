@@ -1,17 +1,20 @@
 # PLAN.md — src/core/actuation
 
-Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–2).
+Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–3).
 
 ## Файлы
 
 - `models.py` — `OptionSource`, `Option`, `OptionWindow`, `OptionContext`,
   `ActuationPreferences`, `OptionCandidate`, `OptionTrace`, `Fact`, `Guard`,
-  `Regularity` (frozen, с валидацией)
+  `Regularity`, `Effect`, `ToolAnnotations`, `ActuationKind`, `ActuationStatus`,
+  `Actuation`, `ActuationResult` (frozen, с валидацией)
 - `compute.py` — `build_options`, `score_option`, `select_option`,
-  `evaluate_fact`, `guard_holds`, `regularity_cost` (Core, чистые)
+  `evaluate_fact`, `guard_holds`, `regularity_cost`, `classify_reversible`
+  (Core, чистые)
 - `facts.py` — реестр `FACTS` (единый источник имён) + `DEFAULT_FACT_VALUE`
 - `__init__.py` — re-export
-- `src/tests/test_actuation.py` (этап 1), `src/tests/test_actuation_facts.py` (этап 2)
+- `src/tests/test_actuation.py` (этап 1), `src/tests/test_actuation_facts.py`
+  (этап 2), `src/tests/test_actuation_effects.py` (этап 3)
 
 ## Порядок
 
@@ -39,6 +42,23 @@
    монотонность, пустой вход, детерминизм, валидация, реестр.
 9. Re-export в `__init__.py` и `src/core/__init__.py`.
 
+### Этап 3 (следующий)
+
+1. `Effect` (frozen): `fact`, `value ∈ [0, 1]`; валидация.
+2. `ActuationKind` (Enum: SPEAK/INVOKE_TOOL), `ActuationStatus`
+   (Enum: RUNNING/SUCCESS/FAILURE/PREEMPTED).
+3. `Actuation` (frozen): `kind`, `goal`, `payload`; валидация непустого goal.
+4. `ActuationResult` (frozen): `status`, `data`.
+5. `ToolAnnotations` (frozen): консервативные дефолты (`read_only=False`,
+   `destructive=True`, `idempotent=False`, `open_world=True`).
+6. `classify_reversible(annotations, *, trusted)` — недоверенный → `False`;
+   доверенный → `read_only and not destructive`.
+7. `Option.guard: Guard | None = None`, `Option.effect: Effect | None = None` —
+   аддитивно (дефолт `None`, совместимость с этапами 1–2).
+8. Тесты: валидация, консервативный дефолт, доверие (trusted), аддитивность
+   (опция без guard/effect работает как раньше), enum-значения.
+9. Re-export в `__init__.py` и `src/core/__init__.py`.
+
 ## Заметки
 
 - `build_options` принимает `Affordance` из `src.mcp.probe` — **не** копирует модель.
@@ -49,4 +69,8 @@
 - `evaluate_fact` **тотален** по имени: неизвестный факт → `fact.default` (не падение).
 - Реестр `FACTS` — единый источник имён: Core и Shell не расходятся молча.
 - Значения фактов ∈ [0, 1]; категориальные факты (режим) не тащим.
-- Связывание фактов с опциями (`Option.guard`/`effect`) — **этап 3**, не здесь.
+- Связывание фактов с опциями (`Option.guard`/`effect`) — **этап 3** (реализовано).
+- **Этап 3:** `Effect` — символьная дельта (планирование), данные — `ActuationResult`.
+- `classify_reversible`: Core не знает `Provenance`; Shell транслирует в `trusted`.
+- `Actuation`/`ActuationResult` — общий статус, разный payload; исполнение — Shell.
+- Прокидка аннотаций MCP — отдельный шаг (правка `mcp/client.py`), не здесь.

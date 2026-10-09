@@ -5,7 +5,8 @@ Voting: k-WTA lateral inhibition for column consensus.
 Attractors: multistable dynamics for task selection via short-term plasticity.
 Homeostasis: interoceptive setpoints and deviation (S4).
 Actuation: open option window over tools for goal selection (S8); facts and
-conditions (guard/regularity) for "default + enrichment" (S8 stage 2).
+conditions (guard/regularity) for "default + enrichment" (S8 stage 2); effects
+and irreversibility-as-stance (S8 stage 3).
 Functional Core / Imperative Shell (ADR-0004) across all core/* modules.
 """
 
@@ -14,7 +15,12 @@ from .actuation import (
     FACTS,
     NETWORK_AVAILABLE,
     TOPIC_BOUND,
+    Actuation,
+    ActuationKind,
     ActuationPreferences,
+    ActuationResult,
+    ActuationStatus,
+    Effect,
     Fact,
     Guard,
     Option,
@@ -24,7 +30,9 @@ from .actuation import (
     OptionTrace,
     OptionWindow,
     Regularity,
+    ToolAnnotations,
     build_options,
+    classify_reversible,
     evaluate_fact,
     guard_holds,
     regularity_cost,
@@ -64,10 +72,15 @@ __all__ = [
     "NETWORK_AVAILABLE",
     "TOPIC_BOUND",
     "Action",
+    "Actuation",
+    "ActuationKind",
     "ActuationPreferences",
+    "ActuationResult",
+    "ActuationStatus",
     "CMCEnsemble",
     "ColumnConfig",
     "ColumnState",
+    "Effect",
     "EnsembleOutput",
     "Fact",
     "Guard",
@@ -89,11 +102,13 @@ __all__ = [
     "Setpoint",
     "TaskAttraction",
     "TaskAttractor",
+    "ToolAnnotations",
     "VotingManager",
     "VotingResult",
     "build_options",
     "check_basin_stability",
     "check_immediate_switch",
+    "classify_reversible",
     "column_step",
     "compute_dwell",
     "evaluate_candidates",
