@@ -10,7 +10,7 @@
 - [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md) — порядок сборки S1–S8
 - [`VALIDATION.md`](VALIDATION.md) — проверка и ворота
 - [`BACKLOG.md`](BACKLOG.md) — задачи
-- [`adr/`](adr/) — Architecture Decision Records (0001–0011)
+- [`adr/`](adr/) — Architecture Decision Records (0001–0012)
 
 ---
 
@@ -49,7 +49,8 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,
 `stages/S7_HITL_PROTOCOL.md` (предыдущие — `stages/S5_SPEC.md`,
 `stages/S5_PLAN.md`); запланированный спринт — `stages/ACTUATION_PLAN.md`
-(секвенирование актуаций, S8, не начато).
+(секвенирование актуаций, S8, не начато). Фундамент S8 (2026-10-09) — открытое
+окно выбора + тотальный скорер; BT/async — надстройка.
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
@@ -64,7 +65,7 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 🟡 (проход 1: selfcontrol, консолидация, EXPLORE, факторизация; проход 2 ✅:
 длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✅
 (harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010) → `S8` секвенирование
-актуаций ✗ запланировано (executive, BT, async, MCP-действие;
+актуаций ✗ запланировано (executive, BT, async, MCP-действие; ADR-0012 принят;
 `stages/ACTUATION_PLAN.md`).
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).
