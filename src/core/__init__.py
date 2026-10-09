@@ -6,7 +6,7 @@ Attractors: multistable dynamics for task selection via short-term plasticity.
 Homeostasis: interoceptive setpoints and deviation (S4).
 Actuation: open option window over tools for goal selection (S8); facts and
 conditions (guard/regularity) for "default + enrichment" (S8 stage 2); effects
-and irreversibility-as-stance (S8 stage 3).
+and irreversibility-as-stance (S8 stage 3); reactive Behavior Tree (S8 stage 4).
 Functional Core / Imperative Shell (ADR-0004) across all core/* modules.
 """
 
@@ -23,6 +23,9 @@ from .actuation import (
     Effect,
     Fact,
     Guard,
+    Node,
+    NodeKind,
+    NodeStatus,
     Option,
     OptionCandidate,
     OptionContext,
@@ -30,14 +33,18 @@ from .actuation import (
     OptionTrace,
     OptionWindow,
     Regularity,
+    TickContext,
+    TickMemory,
     ToolAnnotations,
     build_options,
     classify_reversible,
     evaluate_fact,
     guard_holds,
+    order_children,
     regularity_cost,
     score_option,
     select_option,
+    tick,
 )
 from .attractors import (
     TaskAttraction,
@@ -88,6 +95,9 @@ __all__ = [
     "Homeostat",
     "HomeostaticSignal",
     "MacroContext",
+    "Node",
+    "NodeKind",
+    "NodeStatus",
     "Option",
     "OptionCandidate",
     "OptionContext",
@@ -102,6 +112,8 @@ __all__ = [
     "Setpoint",
     "TaskAttraction",
     "TaskAttractor",
+    "TickContext",
+    "TickMemory",
     "ToolAnnotations",
     "VotingManager",
     "VotingResult",
@@ -115,9 +127,11 @@ __all__ = [
     "evaluate_fact",
     "guard_holds",
     "kwta",
+    "order_children",
     "regularity_cost",
     "score_option",
     "select_action",
     "select_option",
     "setpoint_deviation",
+    "tick",
 ]

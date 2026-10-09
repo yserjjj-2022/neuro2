@@ -18,6 +18,12 @@ symbolic fact-delta (for planning); ``classify_reversible`` turns MCP
 annotations + source trust into reversibility, conservative by default (an
 untrusted source never grants autonomy).
 
+Stage 4 adds the **Behavior Tree**: ``Node`` trees are frozen data and ``tick``
+is a free function — reactive (re-evaluated from the root every tick), with
+``Sequence``/``Fallback``/``Condition``/``Action`` leaves. Action outcomes enter
+the pure Core through ``TickContext.action_status`` (injected by the Shell);
+``tick`` never executes effectors.
+
 Functional Core / Imperative Shell (ADR-0004): identical inputs → identical
 ``OptionTrace``. The window order is the tie-break, so the whole run is a
 pure function of a memoized window snapshot.
@@ -31,6 +37,9 @@ from src.core.actuation.models import (
     ActuationPreferences,
     Fact,
     Guard,
+    Node,
+    NodeKind,
+    NodeStatus,
     Option,
     OptionCandidate,
     OptionContext,
@@ -38,6 +47,8 @@ from src.core.actuation.models import (
     OptionTrace,
     OptionWindow,
     Regularity,
+    TickContext,
+    TickMemory,
     ToolAnnotations,
 )
 from src.mcp.probe import Affordance
@@ -254,3 +265,107 @@ def classify_reversible(annotations: ToolAnnotations, *, trusted: bool) -> bool:
     if not trusted:
         return False
     return annotations.read_only_hint and not annotations.destructive_hint
+
+
+def order_children(
+    children: Sequence[Node], facts: Mapping[str, float]
+) -> tuple[Node, ...]:
+    """Упорядочить детей по мягким предпочтениям (чистая, этап 4).
+
+    Сортировка устойчивая по ``regularity_cost`` детей (меньше — приоритетнее);
+    тай-брейк — исходный порядок (детерминизм). Применяется в ``FALLBACK``;
+    ``SEQUENCE`` сохраняет объявленный порядок.
+
+    Args:
+        children: Дети композита в объявленном порядке.
+        facts: Снимок фактов мира (для ``regularity_cost``).
+
+    Returns:
+        Кортеж детей, отсортированный по возрастанию стоимости.
+    """
+    return tuple(
+        sorted(children, key=lambda child: regularity_cost(child.regularities, facts))
+    )
+
+
+def _tick_sequence(node: Node, context: TickContext) -> tuple[NodeStatus, TickMemory]:
+    """Провести SEQUENCE: все дети по порядку (чистая, этап 4).
+
+    Args:
+        node: Узел SEQUENCE.
+        context: Вход tick (факты + исходы действий).
+
+    Returns:
+        Пара (статус, память): ``FAILURE`` при первом провале, ``RUNNING`` на
+        первом бегущем ребёнке, иначе ``SUCCESS``.
+    """
+    for index, child in enumerate(node.children):
+        status, child_memory = tick(child, context)
+        if status is NodeStatus.FAILURE:
+            return NodeStatus.FAILURE, TickMemory()
+        if status is NodeStatus.RUNNING:
+            return NodeStatus.RUNNING, TickMemory(
+                running_path=(index,) + child_memory.running_path
+            )
+    return NodeStatus.SUCCESS, TickMemory()
+
+
+def _tick_fallback(node: Node, context: TickContext) -> tuple[NodeStatus, TickMemory]:
+    """Провести FALLBACK: первый успешный по приоритету (чистая, этап 4).
+
+    Дети упорядочиваются по мягким предпочтениям; более приоритетный ребёнок,
+    ставший ``SUCCESS``/``RUNNING``, вытесняет бегущего (преемпция).
+
+    Args:
+        node: Узел FALLBACK.
+        context: Вход tick (факты + исходы действий).
+
+    Returns:
+        Пара (статус, память): ``SUCCESS``/``RUNNING`` первого преуспевшего
+        ребёнка, иначе ``FAILURE``.
+    """
+    for index, child in enumerate(order_children(node.children, context.facts)):
+        status, child_memory = tick(child, context)
+        if status is NodeStatus.SUCCESS:
+            return NodeStatus.SUCCESS, TickMemory()
+        if status is NodeStatus.RUNNING:
+            return NodeStatus.RUNNING, TickMemory(
+                running_path=(index,) + child_memory.running_path
+            )
+    return NodeStatus.FAILURE, TickMemory()
+
+
+def tick(node: Node, context: TickContext) -> tuple[NodeStatus, TickMemory]:
+    """Провести один тик дерева с узла (чистая, реактивная, этап 4).
+
+    Дерево перерешается с корня каждый тик — никакого управляющего состояния
+    между тиками; решение полностью определяется ``context``. Исходы действий
+    входят через ``context.action_status`` (инжектит Shell); ``tick`` не
+    исполняет эффекторы.
+
+    Args:
+        node: Текущий узел (обычно корень).
+        context: Вход tick (факты + исходы действий).
+
+    Returns:
+        Пара (статус узла, память с путём до бегущего листа).
+    """
+    if node.kind is NodeKind.CONDITION:
+        guard = node.guard
+        if guard is None:  # недостижимо: валидация Node
+            raise ValueError("condition node requires a guard")
+        status = (
+            NodeStatus.SUCCESS
+            if guard_holds(guard, context.facts)
+            else NodeStatus.FAILURE
+        )
+        return status, TickMemory()
+    if node.kind is NodeKind.ACTION:
+        actuation = node.actuation
+        if actuation is None:  # недостижимо: валидация Node
+            raise ValueError("action node requires an actuation")
+        status = context.action_status.get(actuation.goal, NodeStatus.RUNNING)
+        return status, TickMemory()
+    if node.kind is NodeKind.SEQUENCE:
+        return _tick_sequence(node, context)
+    return _tick_fallback(node, context)

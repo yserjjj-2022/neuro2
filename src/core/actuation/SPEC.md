@@ -9,10 +9,11 @@
 
 Спека покрывает **этап 1** (открытое окно опций, оценка и выбор — заменяющие
 нынешнее вырожденное правило `select_affordance` «первый обратимый»,
-`src/mcp/probe.py`), **этап 2** (факты и кондишены «дефолт + обогащение») и
-**этап 3** (эффекты, единый контракт актуации, классификация необратимости).
-Последующие этапы (BT, генератор) **расширят эту спеку** перед своим кодом —
-здесь они не описываются (см. «Границы»).
+`src/mcp/probe.py`), **этап 2** (факты и кондишены «дефолт + обогащение»),
+**этап 3** (эффекты, единый контракт актуации, классификация необратимости) и
+**этап 4** (Behavior Tree: узлы, tick, преемпция). Последующие этапы (генератор)
+**расширят эту спеку** перед своим кодом — здесь они не описываются
+(см. «Границы»).
 
 Ключевое решение (ADR-0012): опции **не** перечисляются закрытым enum; окно
 порождается **в runtime** из доступных возможностей (встроенные + MCP-тулы).
@@ -278,6 +279,85 @@ def classify_reversible(annotations: ToolAnnotations, *, trusted: bool) -> bool:
 `src/mcp/client.py`, риск транспорта). Здесь `ToolAnnotations` вводится как
 Core-тип, а `Affordance`/`select_affordance` не трогаются.
 
+## Этап 4. Behavior Tree (узлы, tick)
+
+**BT реактивен by construction** (ADR-0012 §5): tick с корня каждый тик; никакого
+«второго executive». Минимальный словарь узлов: `Sequence`, `Fallback`, листья
+`Condition`/`Action`. Статусы `Running`/`Success`/`Failure`. `Parallel` и
+декораторы — **не** вводим до реального кейса.
+
+**Core остаётся чистым:** дерево — frozen-данные, tick — свободная функция,
+память Running передаётся явно, исходы действий инжектит Shell через контекст.
+Отступление от «`Node` — Protocol» (PLAN §Шаг 4): вместо иерархии классов —
+единый frozen `Node` с `NodeKind` (data-first, как весь модуль).
+
+```python
+class NodeKind(Enum):
+    CONDITION = "condition"   # лист: проверка guard
+    ACTION = "action"         # лист: актуация (статус — из контекста)
+    SEQUENCE = "sequence"     # все дети по порядку
+    FALLBACK = "fallback"     # первый успешный (priority, преемпция)
+
+
+class NodeStatus(Enum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+@dataclass(frozen=True)
+class Node:
+    kind: NodeKind
+    name: str = ""
+    guard: Guard | None = None          # для CONDITION
+    actuation: Actuation | None = None  # для ACTION
+    children: tuple[Node, ...] = ()     # для SEQUENCE/FALLBACK
+    regularities: tuple[Regularity, ...] = ()  # мягкий порядок детей
+
+
+@dataclass(frozen=True)
+class TickContext:
+    facts: Mapping[str, float] = field(default_factory=dict)
+    action_status: Mapping[str, NodeStatus] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TickMemory:
+    running_path: tuple[int, ...] = ()  # путь до бегущего листа (выход tick)
+
+
+def tick(
+    node: Node, context: TickContext
+) -> tuple[NodeStatus, TickMemory]: ...
+
+def order_children(
+    children: Sequence[Node], facts: Mapping[str, float]
+) -> tuple[Node, ...]: ...
+```
+
+### Правила (этап 4)
+
+- **Лист `CONDITION`:** `guard_holds(guard, facts)` → `SUCCESS`/`FAILURE`.
+- **Лист `ACTION`:** статус из `context.action_status[actuation.goal]`; отсутствует
+  → `RUNNING` (Shell ещё не отчитался). Так исходы асинхронных действий входят в
+  чистый Core (ADR-0012 §7–8).
+- **`SEQUENCE`:** дети в объявленном порядке; `RUNNING` ребёнка → `RUNNING`;
+  `FAILURE` → `FAILURE`; все `SUCCESS` → `SUCCESS`.
+- **`FALLBACK`:** дети в порядке приоритета; `SUCCESS` ребёнка → `SUCCESS`; все
+  `FAILURE` → `FAILURE`. **Преемпция:** каждый тик дерево перерешается с корня, и
+  более приоритетный ребёнок, ставший `SUCCESS`/`RUNNING`, вытесняет бегущего.
+- **Реактивность:** `tick` не хранит управляющего состояния между тиками —
+  решение полностью определяется текущим `TickContext`. «Resume» достигается
+  через `action_status`: завершённое действие Shell отчитывает как `SUCCESS`, и
+  последовательность продолжается на следующем тике.
+- **`TickMemory`** — **выход** `tick`: путь до бегущего листа (для Shell и
+  телеметрии), пустой, если ничего не бежит.
+- **`order_children`:** устойчивая сортировка по `regularity_cost`
+  (мягкие предпочтения ребёнка); тай-брейк — исходный порядок (детерминизм).
+  Применяется в `FALLBACK` (приоритет); `SEQUENCE` сохраняет объявленный порядок.
+- **Валидация `Node`:** лист без детей и с обязательным `guard`/`actuation`;
+  композит с детьми и без `guard`/`actuation`.
+
 ## Инварианты
 
 1. **FC/IS:** `build_options`/`score_option`/`select_option` — чистые;
@@ -303,6 +383,14 @@ Core-тип, а `Affordance`/`select_affordance` не трогаются.
     только повысить права, не выдать их.
 11. **Аддитивность обогащения (этап 3):** `Option.guard`/`Option.effect` —
     необязательны; без них оценка совместима с этапом 1.
+12. **Реактивность BT (этап 4):** `tick` с корня каждый тик — дерево
+    перерешается по текущему контексту, без «второго executive».
+13. **Детерминизм BT (этап 4):** `tick` и `order_children` — чистые; одинаковый
+    вход → одинаковый статус и память; тай-брейк — исходный порядок.
+14. **Преемпция (этап 4):** `FALLBACK` каждый тик перепроверяет более
+    приоритетных детей; бегущий лист вытесняется, а не «доигрывается вслепую».
+15. **Изоляция ввода-вывода (этап 4):** исходы действий входят в Core через
+    `TickContext.action_status` (инжектит Shell); `tick` не исполняет эффекторы.
 
 ## Критерии приёмки
 
@@ -335,6 +423,17 @@ Core-тип, а `Affordance`/`select_affordance` не трогаются.
 - [ ] Core не импортирует `integrations` (trusted — от Shell)
 - [ ] `ValueError` на некорректных входах
 
+**Этап 4:**
+- [ ] `NodeKind`/`NodeStatus` — enum; `Node` — frozen, с валидацией формы
+      (лист ↔ guard/actuation, композит ↔ children)
+- [ ] `tick` — чистый, тотальный, реактивный (с корня каждый тик)
+- [ ] `CONDITION` — `guard_holds`; `ACTION` — статус из `TickContext`, дефолт `RUNNING`
+- [ ] `SEQUENCE` — порядок, resume по `TickMemory`, `FAILURE` останавливает
+- [ ] `FALLBACK` — приоритет, `SUCCESS` останавливает, преемпция бегущего
+- [ ] `order_children` — устойчивая сортировка по `regularity_cost`
+- [ ] детерминизм: одинаковый вход → одинаковый статус и память
+- [ ] `ValueError` на некорректной форме узла
+
 ## Границы (этапность)
 
 **Входит (этап 1):** окно, скорер, выбор, трасса — для тулов.
@@ -346,8 +445,12 @@ Core-тип, а `Affordance`/`select_affordance` не трогаются.
 `ActuationStatus`, `ToolAnnotations`/`classify_reversible`, поля
 `Option.guard`/`Option.effect`.
 
+**Входит (этап 4):** `Node`/`NodeKind`/`NodeStatus`, `TickContext`/`TickMemory`,
+`tick`, `order_children` (BT: Condition/Action/Sequence/Fallback).
+
 **НЕ входит (расширят спеку перед кодом):**
-- **этап 4+:** `Node`/`Sequence`/`Fallback` (BT), `backward_chain` (генератор);
+- **этап 5+:** `backward_chain` (runtime-генератор);
+- **BT-декораторы и `Parallel`** — не вводим до реального кейса;
 - **прокидка аннотаций MCP** (`tools/list` → `ToolInfo` → `Affordance`) — отдельный шаг;
 - **встроенные речевые действия** в окне (стык с `core/policy`);
 - **исполнение** (эффекторы, executor, async, ожидание) — `host/executor`;

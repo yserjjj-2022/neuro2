@@ -15,7 +15,8 @@ total without them (ADR-0012 §3 "default + enrichment").
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -387,3 +388,101 @@ class ToolAnnotations:
     destructive_hint: bool = True
     idempotent_hint: bool = False
     open_world_hint: bool = True
+
+
+class NodeKind(Enum):
+    """Вид узла Behavior Tree (минимальный словарь, ADR-0012 §5)."""
+
+    CONDITION = "condition"  # лист: проверка guard
+    ACTION = "action"  # лист: актуация (статус — из контекста)
+    SEQUENCE = "sequence"  # композит: все дети по порядку
+    FALLBACK = "fallback"  # композит: первый успешный (priority)
+
+
+class NodeStatus(Enum):
+    """Статус узла BT (идиома Behavior Tree: running/success/failure)."""
+
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+@dataclass(frozen=True)
+class Node:
+    """Узел Behavior Tree — frozen-данные, tick — свободная функция (этап 4).
+
+    Единый тип вместо иерархии классов (data-first, как весь модуль).
+    Валидация формы: лист (CONDITION/ACTION) не имеет детей и несёт
+    ``guard``/``actuation``; композит (SEQUENCE/FALLBACK) имеет детей и не несёт
+    ``guard``/``actuation``.
+
+    Attributes:
+        kind: Вид узла.
+        name: Человекочитаемое имя (для телеметрии/трассы).
+        guard: Кондишен листа CONDITION.
+        actuation: Актуация листа ACTION.
+        children: Дети композита (порядок задаёт приоритет).
+        regularities: Мягкие предпочтения порядка детей (``order_children``).
+    """
+
+    kind: NodeKind
+    name: str = ""
+    guard: Guard | None = None
+    actuation: Actuation | None = None
+    children: tuple[Node, ...] = ()
+    regularities: tuple[Regularity, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Валидация формы узла (лист ↔ композит).
+
+        Raises:
+            ValueError: Если форма узла не согласована с его видом.
+        """
+        is_leaf = self.kind in (NodeKind.CONDITION, NodeKind.ACTION)
+        if is_leaf:
+            if self.children:
+                raise ValueError(
+                    f"leaf node {self.kind.value!r} must not have children"
+                )
+            if self.kind is NodeKind.CONDITION and self.guard is None:
+                raise ValueError("condition node requires a guard")
+            if self.kind is NodeKind.ACTION and self.actuation is None:
+                raise ValueError("action node requires an actuation")
+        else:
+            if not self.children:
+                raise ValueError(
+                    f"composite node {self.kind.value!r} requires children"
+                )
+            if self.guard is not None or self.actuation is not None:
+                raise ValueError(
+                    f"composite node {self.kind.value!r} must not carry guard/actuation"
+                )
+
+
+@dataclass(frozen=True)
+class TickContext:
+    """Вход tick: факты мира + исходы действий (инжектит Shell, этап 4).
+
+    Attributes:
+        facts: Снимок фактов мира (``Mapping[str, float]``), как в этапе 2.
+        action_status: Исходы активаций по ``Actuation.goal`` (от Shell).
+    """
+
+    facts: Mapping[str, float] = field(default_factory=lambda: dict[str, float]())
+    action_status: Mapping[str, NodeStatus] = field(
+        default_factory=lambda: dict[str, NodeStatus]()
+    )
+
+
+@dataclass(frozen=True)
+class TickMemory:
+    """Память между тиками: путь до бегущего узла (реактивный BT, этап 4).
+
+    В дереве без ``Parallel`` активна одна цепочка, поэтому одного пути
+    достаточно.
+
+    Attributes:
+        running_path: Индексы детей от корня до бегущего узла.
+    """
+
+    running_path: tuple[int, ...] = ()

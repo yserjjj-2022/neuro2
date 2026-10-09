@@ -1,20 +1,22 @@
 # PLAN.md — src/core/actuation
 
-Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–3).
+Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–4).
 
 ## Файлы
 
 - `models.py` — `OptionSource`, `Option`, `OptionWindow`, `OptionContext`,
   `ActuationPreferences`, `OptionCandidate`, `OptionTrace`, `Fact`, `Guard`,
   `Regularity`, `Effect`, `ToolAnnotations`, `ActuationKind`, `ActuationStatus`,
-  `Actuation`, `ActuationResult` (frozen, с валидацией)
+  `Actuation`, `ActuationResult`, `NodeKind`, `NodeStatus`, `Node`, `TickContext`,
+  `TickMemory` (frozen, с валидацией)
 - `compute.py` — `build_options`, `score_option`, `select_option`,
-  `evaluate_fact`, `guard_holds`, `regularity_cost`, `classify_reversible`
-  (Core, чистые)
+  `evaluate_fact`, `guard_holds`, `regularity_cost`, `classify_reversible`,
+  `order_children`, `tick` (Core, чистые)
 - `facts.py` — реестр `FACTS` (единый источник имён) + `DEFAULT_FACT_VALUE`
 - `__init__.py` — re-export
 - `src/tests/test_actuation.py` (этап 1), `src/tests/test_actuation_facts.py`
-  (этап 2), `src/tests/test_actuation_effects.py` (этап 3)
+  (этап 2), `src/tests/test_actuation_effects.py` (этап 3),
+  `src/tests/test_actuation_bt.py` (этап 4)
 
 ## Порядок
 
@@ -59,6 +61,24 @@
    (опция без guard/effect работает как раньше), enum-значения.
 9. Re-export в `__init__.py` и `src/core/__init__.py`.
 
+### Этап 4 (следующий)
+
+1. `NodeKind` (Enum: CONDITION/ACTION/SEQUENCE/FALLBACK), `NodeStatus`
+   (Enum: RUNNING/SUCCESS/FAILURE).
+2. `Node` (frozen): `kind`, `name`, `guard`, `actuation`, `children`,
+   `regularities`; валидация формы (лист ↔ guard/actuation, композит ↔ children).
+3. `TickContext` (frozen): `facts`, `action_status` (исходы действий от Shell).
+4. `TickMemory` (frozen): `running_path`.
+5. `order_children(children, facts)` — устойчивая сортировка по
+   `regularity_cost` (тай-брейк — исходный порядок).
+6. `tick(node, context, memory, path)` → `(NodeStatus, TickMemory)`:
+   - CONDITION → `guard_holds`; ACTION → статус из контекста (дефолт RUNNING);
+   - SEQUENCE → порядок, resume по памяти, FAILURE останавливает;
+   - FALLBACK → приоритет, SUCCESS останавливает, преемпция бегущего.
+7. Тесты: листья, sequence (resume/failure), fallback (приоритет/преемпция),
+   `order_children`, детерминизм, валидация формы, тотальность.
+8. Re-export в `__init__.py` и `src/core/__init__.py`.
+
 ## Заметки
 
 - `build_options` принимает `Affordance` из `src.mcp.probe` — **не** копирует модель.
@@ -74,3 +94,7 @@
 - `classify_reversible`: Core не знает `Provenance`; Shell транслирует в `trusted`.
 - `Actuation`/`ActuationResult` — общий статус, разный payload; исполнение — Shell.
 - Прокидка аннотаций MCP — отдельный шаг (правка `mcp/client.py`), не здесь.
+- **Этап 4:** BT — frozen-данные + свободные функции (не иерархия классов).
+- `tick` реактивен: с корня каждый тик; `TickMemory` хранит один `running_path`.
+- Исходы действий входят в Core через `TickContext.action_status` (инжектит Shell).
+- `FALLBACK` даёт преемпцию: более приоритетный ребёнок вытесняет бегущего.
