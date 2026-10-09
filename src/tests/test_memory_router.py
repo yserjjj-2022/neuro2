@@ -31,6 +31,20 @@ class FakeStore:
             raise MemoryStoreError("boom")
         return self.episodes[:limit]
 
+    def all_episodes(self) -> list[Episode]:
+        return list(self.episodes)
+
+    def delete(self, ids: list[int]) -> int:
+        return len(ids)
+
+    def save_schema(
+        self, centroid: np.ndarray, member_count: int, summary: str
+    ) -> int:
+        return member_count
+
+    def count(self) -> int:
+        return len(self.episodes)
+
 
 def _router(
     store: FakeStore | None = None,

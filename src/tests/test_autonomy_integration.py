@@ -14,7 +14,8 @@ import numpy as np
 
 from src.config import AutonomyConfig, HostConfig, MemoryConfig
 from src.host.loop import build_host_loop
-from src.memory import Episode, MemoryStore
+from src.memory import Episode
+from src.memory.protocols import SupportsMemory
 from src.telemetry import TelemetryLogger, TelemetryWriter
 
 
@@ -84,7 +85,7 @@ class TestConsolidationWiring:
         )
         loop = build_host_loop(_config(tmp_path, autonomy=autonomy))
         assert loop.memory is not None
-        store: MemoryStore = loop.memory.store
+        store: SupportsMemory = loop.memory.store
         store.store(
             Episode(
                 content="important",
@@ -138,7 +139,7 @@ class TestNightCycle:
         )
         loop = build_host_loop(_config(tmp_path, autonomy=autonomy))
         assert loop.memory is not None
-        store: MemoryStore = loop.memory.store
+        store: SupportsMemory = loop.memory.store
         store.store(
             Episode(
                 content="trivial",

@@ -91,8 +91,9 @@ class TestToAffordances:
         amap = to_affordances(
             (_spec("w", category=SignalCategory.EXTEROCEPTIVE),)
         )
-        assert amap.find("w") is not None
-        assert amap.find("w").category is SignalCategory.EXTEROCEPTIVE
+        found = amap.find("w")
+        assert found is not None
+        assert found.category is SignalCategory.EXTEROCEPTIVE
 
     def test_duplicate_fail_fast(self) -> None:
         with pytest.raises(ValueError):

@@ -17,7 +17,7 @@ import dataclasses
 import tomllib
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Protocol, TypeVar
 
 from src.config.params import (
     AutonomyConfig,
@@ -28,6 +28,15 @@ from src.config.params import (
     SpeechConfig,
 )
 from src.core.homeostasis import Setpoint
+
+
+class _Dataclass(Protocol):
+    """Структурный вид dataclass (для рекурсивного merge без ``Any``)."""
+
+    __dataclass_fields__: ClassVar[dict[str, Any]]
+
+
+_T = TypeVar("_T", bound=_Dataclass)
 
 
 def _deterministic_base() -> HostConfig:
@@ -112,7 +121,7 @@ _PRESETS = {
 }
 
 
-def _merge(config: HostConfig, data: dict[str, Any], path: str = "") -> HostConfig:
+def _merge(config: _T, data: dict[str, Any], path: str = "") -> _T:
     """Рекурсивно наложить TOML-данные на конфиг (fail-fast).
 
     Args:
@@ -121,7 +130,7 @@ def _merge(config: HostConfig, data: dict[str, Any], path: str = "") -> HostConf
         path: Префикс пути для сообщений об ошибке.
 
     Returns:
-        Новый HostConfig с перезаписанными полями.
+        Новый конфиг того же типа с перезаписанными полями.
 
     Raises:
         ValueError: Если ключ неизвестен, секция наложена на не-dataclass или

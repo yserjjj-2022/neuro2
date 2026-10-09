@@ -26,7 +26,10 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -130,13 +133,13 @@ class ApiLlmClient:
     api_key: str | None = None
     temperature: float = 0.7
     reasoning: bool = False
-    _client: object = field(default=None, init=False, repr=False)
+    _client: OpenAI | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError(f"temperature must be in [0, 2], got {self.temperature}")
 
-    def _ensure_client(self) -> object:
+    def _ensure_client(self) -> OpenAI:
         """Лениво создать клиент (первый вызов reply).
 
         Returns:
@@ -179,7 +182,7 @@ class ApiLlmClient:
         try:
             response = client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=cast("Any", messages),
                 max_tokens=max_tokens,
                 temperature=self.temperature,
                 extra_body={"reasoning": {"enabled": self.reasoning}},

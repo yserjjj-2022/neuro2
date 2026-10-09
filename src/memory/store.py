@@ -13,7 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-import sqlite_vec  # type: ignore[import-not-found]  # пакет без стабов
+import sqlite_vec  # type: ignore[import-untyped]  # пакет без стабов
 
 from .errors import MemoryStoreError
 from .hash import content_hash

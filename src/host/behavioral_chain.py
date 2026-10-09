@@ -622,7 +622,7 @@ def goal_instruction_present(system: str, goal: str) -> bool:
         True, если инструкция цели присутствует в промпте.
     """
     instruction = GOAL_INSTRUCTIONS.get(goal)
-    return bool(instruction) and instruction in system
+    return instruction is not None and instruction in system
 
 
 @dataclass
@@ -1673,7 +1673,7 @@ def report_dict(results: Sequence[ScenarioResult]) -> dict[str, Any]:
             "total": summary["total"],
             "passed": summary["passed"],
             "failed": summary["failed"],
-            "failed_ids": list(summary["failed_ids"]),  # type: ignore[arg-type]
+            "failed_ids": list(summary["failed_ids"]),  # type: ignore[call-overload]
         },
         "scenarios": [result_dict(result) for result in results],
     }

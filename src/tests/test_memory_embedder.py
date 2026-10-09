@@ -171,7 +171,7 @@ class TestApiEmbedderContract:
                     return _Resp([3.0, 4.0])
 
         emb = ApiEmbedder(dim=2)
-        emb._client = _Client()
+        emb._client = _Client()  # type: ignore[assignment]
         v = emb.embed("hello")
         assert np.linalg.norm(v) == pytest.approx(1.0)
         assert v.tolist() == pytest.approx([0.6, 0.8])

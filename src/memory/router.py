@@ -20,7 +20,7 @@ from .errors import MemoryStoreError
 from .events import build_event_content, is_significant_event
 from .models import Episode
 from .prior import MEMORY_PRIOR_DIM, encode_memory_prior
-from .protocols import SupportsConsolidate, SupportsRecall, SupportsStore
+from .protocols import SupportsMemory
 from .serialize import Vector
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class MemoryRouter:
 
     def __init__(
         self,
-        store: SupportsStore & SupportsRecall & SupportsConsolidate,
+        store: SupportsMemory,
         embedder: Embedder,
         spike_threshold: float,
         recall_limit: int = 1,

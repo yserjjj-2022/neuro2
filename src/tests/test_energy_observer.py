@@ -24,7 +24,7 @@ def test_observer_no_sink(observer: EnergyObserver) -> None:
 
 def test_observer_with_sink(observer: EnergyObserver) -> None:
     """sink вызывается с результатом."""
-    log = []
+    log: list[FreeEnergyResult] = []
     observer.sink = log.append
     error = np.array([1.0])
     precision = np.array([1.0])

@@ -105,7 +105,8 @@ class Probe:
         preset: Имя пресета (ручки заморожены).
         setup: Скрипт прогона (seed/ticks/messages).
         question: Вопрос наблюдателю.
-        branches: Правило ветвления ``verdict → id`` следующей пробы.
+        branches: Правило ветвления ``verdict → id`` следующей пробы
+            (``None`` — конец ветки).
         fallback: Проба по умолчанию, если ветвление не задано.
     """
 
@@ -114,7 +115,7 @@ class Probe:
     preset: str
     setup: ProbeSetup
     question: str
-    branches: tuple[tuple[Verdict, str], ...] = ()
+    branches: tuple[tuple[Verdict, str | None], ...] = ()
     fallback: str | None = None
 
     def __post_init__(self) -> None:

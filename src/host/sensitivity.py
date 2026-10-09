@@ -30,6 +30,7 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from src.config import AutonomyConfig, HostConfig, MemoryConfig, PolicyConfig
 from src.core.policy import Action, Preferences, select_action
@@ -239,8 +240,9 @@ def _apply_knob(config: HostConfig, knob: str, value: float) -> HostConfig:
         ValueError: Если ручка неизвестна.
     """
     if knob in _PREFERENCE_KNOBS:
+        updates: dict[str, Any] = {knob: value}
         preferences: Preferences = replace(
-            config.policy.preferences, **{knob: value}
+            config.policy.preferences, **updates
         )
         return replace(config, policy=replace(config.policy, preferences=preferences))
     if knob == "f_threshold":

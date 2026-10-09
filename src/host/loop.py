@@ -803,7 +803,7 @@ def build_host_loop(
             dim=config.memory.embedding_dim,
             model=str(api["model"]),
             base_url=str(api["base_url"]),
-            api_dim=int(api["api_dim"]),  # type: ignore[arg-type]
+            api_dim=int(api["api_dim"]),  # type: ignore[call-overload]
         )
         store = MemoryStore(db_path=config.memory.db_path, embedding_dim=embedder.dim)
         memory = MemoryRouter(

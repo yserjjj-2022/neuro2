@@ -27,11 +27,14 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
 from .serialize import Vector
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -154,14 +157,14 @@ class ApiEmbedder:
     base_url: str = DEFAULT_BASE_URL
     api_key: str | None = None
     normalize: bool = True
-    _client: object = field(default=None, init=False, repr=False)
+    _client: OpenAI | None = field(default=None, init=False, repr=False)
     _cache: dict[str, Vector] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.dim <= 0:
             raise ValueError(f"dim must be > 0, got {self.dim}")
 
-    def _ensure_client(self) -> object:
+    def _ensure_client(self) -> OpenAI:
         """Лениво создать клиент (первый вызов embed).
 
         Returns:

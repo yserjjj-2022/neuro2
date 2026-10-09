@@ -48,3 +48,12 @@ class SupportsConsolidate(Protocol):
     def save_schema(self, centroid: Vector, member_count: int, summary: str) -> int: ...
 
     def count(self) -> int: ...  # S6 проход 2: ночной цикл
+
+
+class SupportsMemory(SupportsStore, SupportsRecall, SupportsConsolidate, Protocol):
+    """Комбинированный контракт хранилища памяти (store + recall + consolidate).
+
+    Объединяет три протокола в один, чтобы ``MemoryRouter`` мог принять
+    ``MemoryStore`` без синтаксиса пересечения типов (``A & B`` не поддерживается
+    mypy в аннотациях).
+    """

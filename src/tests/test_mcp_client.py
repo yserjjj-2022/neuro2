@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ def _server_env() -> dict[str, str]:
 
 
 @pytest.fixture()
-def client() -> MCPClient:
+def client() -> Iterator[MCPClient]:
     mcp = MCPClient()
     mcp.connect_stdio(
         sys.executable,

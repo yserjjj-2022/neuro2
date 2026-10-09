@@ -88,7 +88,7 @@ def test_logger_swallows_writer_errors(
         call_count["n"] += 1
         raise OSError("disk full")
 
-    mock_writer.write = failing_write
+    mock_writer.write = failing_write  # type: ignore[method-assign]
 
     # Не должно проброситься
     logger.log(

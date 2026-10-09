@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -16,7 +17,7 @@ from src.integrations.models import (
 )
 from src.integrations.registry import IntegrationRegistry
 from src.integrations.runtime import ProbeTransport, hash_text_to_vector
-from src.mcp.client import MCPClientError
+from src.mcp.client import MCPClient, MCPClientError
 from src.mcp.models import SignalCategory
 from src.mcp.probe import Affordance
 
@@ -58,37 +59,44 @@ class _FakeClient:
         return _Result(True, self._text)
 
 
+def _routes(
+    items: dict[str, tuple[_FakeClient, str, dict[str, str]]],
+) -> dict[str, tuple[MCPClient, str, dict[str, str]]]:
+    """Собрать маршруты ProbeTransport с fake-клиентами (приведение типа)."""
+    return cast("dict[str, tuple[MCPClient, str, dict[str, str]]]", items)
+
+
 class TestProbeTransport:
     def test_call_returns_vector(self) -> None:
-        transport = ProbeTransport({"echo": (_FakeClient("hi"), "echo", {})})
+        transport = ProbeTransport(_routes({"echo": (_FakeClient("hi"), "echo", {})}))
         vec = transport(Affordance("echo", SignalCategory.EXTEROCEPTIVE))
         assert len(vec) == 4
         assert vec == hash_text_to_vector("hi", 4)
 
     def test_arguments_forwarded(self) -> None:
         client = _FakeClient("hi")
-        transport = ProbeTransport(
-            {"echo": (client, "echo", {"k": "v"})}
-        )
+        transport = ProbeTransport(_routes({"echo": (client, "echo", {"k": "v"})}))
         transport(Affordance("echo", SignalCategory.EXTEROCEPTIVE))
         assert client.last_args == {"k": "v"}
 
     def test_missing_route_empty(self) -> None:
-        transport = ProbeTransport({})
+        transport = ProbeTransport(_routes({}))
         assert transport(Affordance("nope", SignalCategory.EXTEROCEPTIVE)) == ()
 
     def test_error_isolated(self) -> None:
         transport = ProbeTransport(
-            {"echo": (_FakeClient(error=True), "echo", {})}
+            _routes({"echo": (_FakeClient(error=True), "echo", {})})
         )
         assert transport(Affordance("echo", SignalCategory.EXTEROCEPTIVE)) == ()
 
     def test_affordances_from_routes(self) -> None:
         transport = ProbeTransport(
-            {
-                "a": (_FakeClient(), "a", {}),
-                "b": (_FakeClient(), "b", {}),
-            }
+            _routes(
+                {
+                    "a": (_FakeClient(), "a", {}),
+                    "b": (_FakeClient(), "b", {}),
+                }
+            )
         )
         assert set(transport.affordances().names) == {"a", "b"}
 

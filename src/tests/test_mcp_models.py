@@ -57,7 +57,7 @@ def test_signal_source_frozen() -> None:
         data=np.array([1.0], dtype=np.float64),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        sig.severity = 0.5  # type: ignore[assignment]
+        sig.severity = 0.5  # type: ignore[misc]
 
 
 def test_signal_source_valid() -> None:

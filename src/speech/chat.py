@@ -265,7 +265,7 @@ class ChatSession:
 
     def _decide_goal(
         self, *, has_new_message: bool, partner: PartnerView | None = None
-    ) -> tuple[str | None, bool, SpeechDecision]:
+    ) -> tuple[str | None, bool, SpeechDecision | None]:
         """Решить речевое действие через policy (S4/S5) или S3-дефолт.
 
         Policy — **единственный авторитет** решения о речи (S4-долг): её
