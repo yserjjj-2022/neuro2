@@ -8,16 +8,28 @@ generator ablation (the chain collapses — non-tautological) and determinism.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+from src.config import (
+    ActuationConfig,
+    AutonomyConfig,
+    HostConfig,
+    MemoryConfig,
+)
 from src.core.actuation import (
     Actuation,
     ActuationKind,
     ActuationStatus,
     Effect,
     Fact,
+    Goal,
+    Guard,
     Option,
     OptionSource,
+    backward_chain,
 )
 from src.host.behavioral_chain import (
     ArgumentGrounding,
@@ -36,6 +48,11 @@ from src.host.behavioral_chain import (
     default_chain_ablations,
     default_chain_scenarios,
 )
+from src.host.loop import build_host_loop
+from src.host.sensitivity import DeterministicMeter
+from src.integrations.runtime import ProbeTransport
+from src.mcp.models import SignalCategory
+from src.mcp.probe import Affordance, AffordanceMap
 
 _NET = Fact("report_ready")
 _TOPIC = Fact("topic_bound")
@@ -470,6 +487,155 @@ class TestChainAblation:
         assert first.baseline_steps == second.baseline_steps
         assert first.ablated_steps == second.ablated_steps
         assert first.passed == second.passed
+
+
+class _FakeMcpClient:
+    """Минимальный fake MCP-клиент (без I/O) для mock-MCP прогона."""
+
+    def __init__(self, text: str = "ok") -> None:
+        self._text = text
+        self.calls: list[str] = []
+
+    def call_tool(self, name: str, arguments: object = None) -> Any:
+        class _Result:
+            def __init__(self, success: bool, text: str) -> None:
+                self.success = success
+                self.text = text
+
+        self.calls.append(name)
+        return _Result(True, self._text)
+
+
+class TestChainIntegration:
+    """Shell: сквозной прогон сложной реакции через реальный HostLoop (§7.10).
+
+    Строит окно опций из карты аффордансов (``build_options``), выводит дерево
+    генератором (``backward_chain``) и ведёт его через ``HostLoop.tick_actuation``
+    (executor → ProbeEffector → gate → транспорт → данные в ``completed``).
+
+    Контракт имён: имя аффорданса = ``option.id`` (payload активации), поэтому
+    окно из ``build_options`` с ``tool:``-именами разрешается в probe без
+    обрезки префикса (см. хендофф-грабли).
+    """
+
+    def _loop(self, tmp_path: Path, amap: AffordanceMap, probe_fn: Any) -> Any:
+        cfg = HostConfig(
+            memory=MemoryConfig(enabled=False),
+            log_path=str(tmp_path / "run.jsonl"),
+            autonomy=AutonomyConfig(enabled=True),
+            actuation=ActuationConfig(enabled=True),
+        )
+        return build_host_loop(
+            cfg, meter=DeterministicMeter(), affordances=amap, probe_fn=probe_fn
+        )
+
+    def test_two_step_reaction_end_to_end(self, tmp_path: Path) -> None:
+        """Цель достигается двумя тулами через реальный контур актуации."""
+        # Имя аффорданса = option.id (payload активации шлётся как имя аффорданса),
+        # поэтому карта именуется полными id — единый контракт с ChainHarness.
+        amap = AffordanceMap(
+            (
+                Affordance("tool:probe", SignalCategory.EXTEROCEPTIVE, True, 2),
+                Affordance("tool:search", SignalCategory.EXTEROCEPTIVE, True, 3),
+            )
+        )
+        calls: list[str] = []
+
+        def probe_fn(affordance: Affordance) -> tuple[float, ...]:
+            calls.append(affordance.name)
+            return tuple(0.5 for _ in range(affordance.dim))
+
+        loop = self._loop(tmp_path, amap, probe_fn)
+        try:
+            net, topic = Fact("report_ready"), Fact("topic_bound")
+            options = (
+                Option(
+                    "tool:probe",
+                    OptionSource.TOOL,
+                    guard=Guard(topic, 0.5),
+                    effect=Effect(net),
+                ),
+                Option("tool:search", OptionSource.TOOL, effect=Effect(topic)),
+            )
+            tree = backward_chain(Goal(net), options, {})
+
+            completed: list[Any] = []
+            for _ in range(8):
+                outcome = loop.tick_actuation(tree)
+                assert outcome is not None
+                completed.extend(outcome.completed)
+                if loop.executor is not None and loop.executor.done:
+                    break
+
+            goals = [r.actuation.goal for r in completed if r.actuation is not None]
+            assert goals == ["tool:search", "tool:probe"]
+            assert all(r.status is ActuationStatus.SUCCESS for r in completed)
+            assert [len(r.data) for r in completed] == [3, 2]
+            assert calls == ["tool:search", "tool:probe"]
+        finally:
+            loop.close()
+
+    def test_build_options_ids_are_prefixed(self) -> None:
+        """``build_options`` даёт id ``tool:<name>`` из имён аффордансов."""
+        from src.core.actuation import build_options
+
+        amap = AffordanceMap(
+            (
+                Affordance("probe", SignalCategory.EXTEROCEPTIVE, True, 2),
+                Affordance("search", SignalCategory.EXTEROCEPTIVE, True, 3),
+            )
+        )
+        window = build_options(amap.affordances)
+        assert window.ids == ("tool:probe", "tool:search")
+
+    def test_mock_mcp_transport_returns_data(self, tmp_path: Path) -> None:
+        """Транспорт mock-MCP: вывод тула → вектор в шину (end-to-end)."""
+        client = _FakeMcpClient("hello")
+        transport = ProbeTransport(
+            {"tool:probe": (client, "probe", {})}  # type: ignore[dict-item]
+        )
+        amap = AffordanceMap(
+            (Affordance("tool:probe", SignalCategory.EXTEROCEPTIVE, True, 4),)
+        )
+        loop = self._loop(tmp_path, amap, transport)
+        try:
+            net = Fact("report_ready")
+            options = (Option("tool:probe", OptionSource.TOOL, effect=Effect(net)),)
+            tree = backward_chain(Goal(net), options, {})
+
+            completed: list[Any] = []
+            for _ in range(4):
+                outcome = loop.tick_actuation(tree)
+                assert outcome is not None
+                completed.extend(outcome.completed)
+                if loop.executor is not None and loop.executor.done:
+                    break
+
+            assert len(completed) == 1
+            assert completed[0].status is ActuationStatus.SUCCESS
+            assert len(completed[0].data) == 4
+            assert client.calls == ["probe"]
+        finally:
+            loop.close()
+
+    def test_disabled_contour_is_noop(self, tmp_path: Path) -> None:
+        """Секвенирование выключено → tick_actuation — no-op (S7-совместимость)."""
+        cfg = HostConfig(
+            memory=MemoryConfig(enabled=False),
+            log_path=str(tmp_path / "run.jsonl"),
+        )
+        loop = build_host_loop(cfg, meter=DeterministicMeter())
+        try:
+            assert loop.actuation_enabled is False
+            net = Fact("report_ready")
+            tree = backward_chain(
+                Goal(net),
+                (Option("tool:probe", OptionSource.TOOL, effect=Effect(net)),),
+                {},
+            )
+            assert loop.tick_actuation(tree) is None
+        finally:
+            loop.close()
 
 
 class TestDefaultCorpus:

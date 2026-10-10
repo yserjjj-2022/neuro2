@@ -13,7 +13,7 @@
 - [`BACKLOG.md`](BACKLOG.md) — задачи по стадиям
 - [`adr/`](adr/) — Architecture Decision Records
 - [`stages/`](stages/) — SPEC/PLAN по стадиям сборки
-  (запланированный спринт — [`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md), S8)
+  ([`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md) — S8, ✅ реализовано)
 
 ## Установка
 
@@ -78,13 +78,16 @@ critical slowing down, протокол сброса), консолидация 
 `stages/S7_HITL_PROTOCOL.md` (ADR-0010). **Реестр интеграций + MCP-транспорт
 реализован** (ADR-0011): каталог подключений (Python-база + TOML-override) +
 реальные MCP-серверы (stdio) вместо mock-зондирования, флаг `--integrations PATH`.
-1061 тест.
+**S8 (секвенирование актуаций) завершён:** открытое окно выбора + тотальный
+скорер, единый контракт эффектора (речь/tool), Behavior Tree-исполнитель,
+runtime-генератор backward chaining, дефолт off (`ActuationConfig`); валидация —
+VALIDATION §7.10 (инварианты звеньев 4–5, ablation, fidelity, сквозной прогон
+через `HostLoop.tick_actuation`). 1266 тестов.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
 
-**Запланировано:** `S8` секвенирование актуаций (executive-слой, Behavior Tree,
-асинхронность, MCP как действие) — [`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md),
-не начато. Фундамент спринта (уточнено 2026-10-09) — **открытое окно выбора +
-тотальный скорер**; BT/async — надстройка.
+**Открытый шов:** именование аффордансов (raw name vs `option.id`) — окно из
+`build_options` через реальный wiring пока не разрешается в probe; см. BACKLOG
+(S8) и VALIDATION §7.10.
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
 программирование поведения.

@@ -38,19 +38,19 @@
 | `host/sensitivity` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/diagnostic` | — | — | — | ✅ реализовано (S7) | S7 |
 | `host/probes` | — | — | — | ✅ реализовано (S7) | S7 |
-| `host/behavioral_chain` | — | — | — | ✅ реализовано: звенья 1–5 + ablation + fidelity + предусловия | VALIDATION §7 |
+| `host/behavioral_chain` | — | — | — | ✅ реализовано: звенья 1–5 + ablation + fidelity + предусловия + §7.10 | VALIDATION §7 |
 | `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
-| `core/actuation` | — | — | — | ✗ не начато (S8) | S8 |
-| `host/executor` | — | — | — | ✗ не начато (S8) | S8 |
-| `config/actuation` | — | — | — | ✗ не начато (S8) | S8 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1061) | все |
+| `core/actuation` | [SPEC](src/core/actuation/SPEC.md) | [PLAN](src/core/actuation/PLAN.md) | — | ✅ реализовано (окно/скорер/факты/эффекты/BT/генератор) | S8 |
+| `host/executor` | — | — | — | ✅ реализовано (эффекторы + executor + async) | S8 |
+| `config/actuation` | — | — | — | ✅ реализовано (`ActuationConfig`, дефолт off) | S8 |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1266) | все |
 
 SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,
 `stages/S7_HITL_PROTOCOL.md` (предыдущие — `stages/S5_SPEC.md`,
-`stages/S5_PLAN.md`); запланированный спринт — `stages/ACTUATION_PLAN.md`
-(секвенирование актуаций, S8, не начато). Фундамент S8 (2026-10-09) — открытое
-окно выбора + тотальный скорер; BT/async — надстройка.
+`stages/S5_PLAN.md`); спринт — `stages/ACTUATION_PLAN.md`
+(секвенирование актуаций, S8, ✅ реализовано). Фундамент S8 (2026-10-09) —
+открытое окно выбора + тотальный скорер; BT/async — надстройка.
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
@@ -65,7 +65,7 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 🟡 (проход 1: selfcontrol, консолидация, EXPLORE, факторизация; проход 2 ✅:
 длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✅
 (harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010) → `S8` секвенирование
-актуаций ✗ запланировано (executive, BT, async, MCP-действие; ADR-0012 принят;
+актуаций ✅ (executive, BT, async, MCP-действие; ADR-0012;
 `stages/ACTUATION_PLAN.md`).
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).

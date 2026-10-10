@@ -628,6 +628,21 @@ ADR-0010 §7). Печатается **микроотчёт** и итог `summar
 одношаговую и **смешанную** (speak + tool), так что форма `TEXT` тоже покрыта.
 До реализации §7.1–§7.9 остаются в силе без изменений.
 
+**Сквозной интеграционный прогон** (`TestChainIntegration`): та же сложная
+реакция ведётся не только через `ChainHarness`, но и через реальный контур
+`HostLoop.tick_actuation` (executor → `ToolEffector` → `ProbeEffector`/gate →
+транспорт → данные в `completed`), включая mock-MCP-транспорт (`ProbeTransport`
+поверх fake-клиента) и no-op при выключенном `ActuationConfig`.
+
+> **Шов именования аффордансов (открыто, BACKLOG S8).** Контракт «имя
+> аффорданса = `option.id`» (`build_options` даёт `tool:<name>`; `ToolEffector`
+> шлёт `payload` как имя аффорданса) сейчас согласован только внутри
+> `ChainHarness`. Runtime-карта из `to_affordances`/`default_affordances`
+> именует аффордансы **голым** именем тула (`web_search`), поэтому окно из
+> `build_options` через реальный wiring даёт `Failure` (`unknown affordance`).
+> До разрешения (единый префикс vs голое имя в `payload`) интеграционный тест
+> фиксирует рабочий контракт «имя аффорданса = `option.id`».
+
 ---
 
 ## 8. Как это связано с кодом

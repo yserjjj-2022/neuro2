@@ -710,6 +710,17 @@ Ablation выключает генератор (пустое окно) — це�
 наблюдаемого подтверждает атрибуцию (анти-тавтология). Вход — pytest-гейт
 (`test_actuation_chain.py`).
 
+Сквозной интеграционный прогон (`TestChainIntegration`) ведёт ту же реакцию
+через реальный `HostLoop.tick_actuation` (executor → `ToolEffector` →
+`ProbeEffector`/gate → транспорт → данные в `completed`), включая mock-MCP
+(`ProbeTransport` поверх fake-клиента) и no-op при выключенном `ActuationConfig`.
+
+> **Шов именования (открыто).** Имя аффорданса = `option.id` (payload активации
+> шлётся как имя аффорданса), поэтому карта именуется `tool:<name>`. Runtime-карта
+> из `to_affordances`/`default_affordances` пока именует аффордансы голым именем
+> тула — окно из `build_options` через реальный wiring не разрешается в probe.
+> Деталь и варианты решения — BACKLOG (S8) и VALIDATION §7.10.
+
 ## Инварианты
 
 1. `dt > 0`; decay/интегралы в секундах.

@@ -210,7 +210,7 @@ et al. (arXiv 1611.00230) и three-layer (Firby 1990, Gat 1998). Форма `Eff
 ## References
 - [stages/ACTUATION_PLAN.md](../stages/ACTUATION_PLAN.md) (план S8, порядок работ)
 - [BUILD_ROADMAP.md](../BUILD_ROADMAP.md) §3 (стадия S8)
-- [VALIDATION.md](../VALIDATION.md) §7.10 (планируемое расширение)
+- [VALIDATION.md](../VALIDATION.md) §7.10 (реализовано)
 - [src/core/policy/models.py](../src/core/policy/models.py) (`Action`, `PolicyCandidate`)
 - [src/core/policy/compute.py](../src/core/policy/compute.py) (`_ACTION_ORDER`)
 - [src/mcp/probe.py](../src/mcp/probe.py) (`Affordance`, `select_affordance`)

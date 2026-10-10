@@ -5,6 +5,11 @@
 цепочкой из 2–3 шагов. Стадия **S8**; решение зафиксировано в
 **ADR-0012** (принят 2026-10-09); до кода — модульные SPEC (CONSTITUTION §5).
 
+> **Статус: ✅ реализовано (шаги 0–9).** Открытое окно + тотальный скорер,
+> эффекты/BT/генератор (Core), эффекторы+executor+async (Shell), конфиг/
+> телеметрия/wiring, §7.10-валидация со сквозным прогоном. Открытый шов —
+> именование аффордансов (raw name vs `option.id`), см. BACKLOG (S8).
+
 Предпосылки: S3 (речь), S4 (policy, `CapabilityGate`), S6 (MCP-зондирование,
 `ProbeEffector`, `AffordanceMap`), S7 (b-тест, §7). Замыкает долг
 `[INT][action] ACTION-вид (исполнители)` (BACKLOG, ADR-0011 §2) и открывает
@@ -430,11 +435,17 @@ replay**. Внутри прогона decision работает с заморо�
 `ArgumentGrounding`/`classify_argument`, `ChainScenario`/`ChainHarness`/
 `ChainAblation*`), pytest-гейт `src/tests/test_actuation_chain.py`.
 
-### Шаг 9. Валидация
+### Шаг 9. Валидация ✅
 
-1. Интеграционный прогон: сложная реакция (2–3 шага) end-to-end на mock-MCP.
+1. Интеграционный прогон: сложная реакция (2–3 шага) end-to-end через реальный
+   `HostLoop.tick_actuation` (executor → `ToolEffector` → `ProbeEffector`/gate →
+   транспорт → данные в `completed`), включая mock-MCP (`ProbeTransport` поверх
+   fake-клиента) и no-op при выключенном `ActuationConfig`
+   (`TestChainIntegration` в `test_actuation_chain.py`).
 2. Синк `BUILD_ROADMAP.md`, `VALIDATION.md`, `SPECS.md`, `BACKLOG.md`,
-   `README.md`.
+   `README.md`, `adr/0012`.
+3. Открытый шов — именование аффордансов (raw name vs `option.id`): зафиксирован
+   в BACKLOG (S8) и VALIDATION §7.10, требует отдельного решения.
 
 ## План тестов
 
@@ -494,10 +505,11 @@ BT реактивен by construction, «второго executive» нет; ме
 
 План зафиксирован (обсуждение 2026-10-08), **уточнён 2026-10-09** (сдвиг
 фундамента на выбор; см. «Сдвиг фундамента»). **ADR-0012 принят** (2026-10-09).
-Реализованы шаги 0–8 (Core-окно/скорер/факты/эффекты/BT/генератор, Shell-
+Реализованы шаги 0–9 (Core-окно/скорер/факты/эффекты/BT/генератор, Shell-
 эффекторы+executor, конфиг/телеметрия/wiring, §7-обобщение звена 4 + ablation +
-fidelity аргумента). Остаётся шаг 9 (валидация: интеграционный прогон end-to-end
-на mock-MCP + синк доков).
+fidelity аргумента, валидация: сквозной интеграционный прогон через
+`HostLoop.tick_actuation` + mock-MCP). Открытый шов — именование аффордансов
+(raw name vs `option.id`); зафиксирован в BACKLOG (S8) и VALIDATION §7.10.
 Синхронизирован с: `BUILD_ROADMAP.md` (спина S1–S8 + §1/§3),
 `BACKLOG.md` (секция «S8. Секвенирование актуаций»),
 `SPECS.md` (запланированные модули `core/actuation`/`host/executor`/

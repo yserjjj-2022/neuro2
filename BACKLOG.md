@@ -290,7 +290,8 @@ B (мета-пластичность, само-модель) — горизон�
 
 > **План:** [`stages/ACTUATION_PLAN.md`](stages/ACTUATION_PLAN.md). Стадия **S8**;
 > решение — **ADR-0012** (принят 2026-10-09); до кода — модульные SPEC
-> (CONSTITUTION §5.1). **Реализованы шаги 0–8; остаётся шаг 9 (валидация).**
+> (CONSTITUTION §5.1). **Реализованы шаги 0–9** (включая валидацию §7.10 и
+> сквозной интеграционный тест через `HostLoop.tick_actuation`).
 > Сложная реакция = одна цель через несколько актуаций (в т.ч. не-текстовых,
 > через MCP) и цепочка 2–3 шагов. Вводит executive-слой над эффекторами,
 > асинхронность, Behavior Tree, runtime-генератор backward chaining.
@@ -313,6 +314,7 @@ B (мета-пластичность, само-модель) — горизон�
 | [S8][actuation] Shell: эффекторы + executor + async + ожидание | `Effector`-адаптеры, tick BT, детерминированный планировщик завершений; нетерпение как сигнал | Шаг 6 плана | P1 | 2026-10-08 |
 | [S8][actuation] Конфиг/телеметрия/wiring | `ActuationConfig`, матрица видовых предпочтений, дефолт off; снимок окна в телеметрию | Шаг 7 плана | P1 | 2026-10-08 |
 | [S8][test] §7: обобщение звена 4 + ablation ✅ | «Каждый шаг прошёл gate и завершился ⇔ решён»; форма ↔ интент шага + схема тула (`dim`); выключи генератор → цепочка схлопывается; fidelity «аргумент из подцели». Реализовано: `ChainStep`/`ChainView`/`ChainInvariant`/`check_chain`/`chain_shares`, `ArgumentGrounding`/`classify_argument`, `ChainScenario`/`ChainHarness`/`ChainAblation*`, `test_actuation_chain.py` | Шаг 8 плана | P1 | 2026-10-08 |
+| [S8][actuation] Шов именования аффордансов: raw name vs `option.id` | `build_options` даёт id `tool:<name>` и кладёт его в `Actuation.payload`; `ToolEffector._invoke` шлёт payload как имя аффорданса. Но runtime-карта из `to_affordances`/`default_affordances` именует аффордансы **голым** именем тула (`web_search`), а `ChainHarness` — полным id (`tool:probe`). Итог: окно из `build_options` не разрешается в probe через реальный wiring → `Failure`. Нужно решить: (а) карта именуется `tool:<name>` (единый контракт) либо (б) `_action_for` кладёт в payload голое имя. Затрагивает ADR-0011/0012, `to_affordances`, `ProbeTransport`, wiring. До решения — интеграционный тест использует контракт «имя аффорданса = `option.id`» | Обнаружено при сквозном тесте шага 9 | P1 | 2026-10-10 |
 
 #### Поведенческий автотест хоста (VALIDATION §7)
 
