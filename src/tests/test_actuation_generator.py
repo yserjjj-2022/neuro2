@@ -85,6 +85,23 @@ class TestBackwardChain:
         assert node.actuation is not None
         assert node.actuation.goal == "tool:probe"
 
+    def test_payload_falls_back_to_id_without_target(self) -> None:
+        """Без target payload = id (обратная совместимость hand-built опций)."""
+        options = (_option("tool:probe", effect=_NET),)
+        node = backward_chain(Goal(_NET), options, {})
+        assert node.actuation is not None
+        assert node.actuation.payload == "tool:probe"
+
+    def test_payload_uses_target_when_set(self) -> None:
+        """С target payload = реальное имя вызова, а goal — id окна."""
+        options = (
+            Option("tool:probe", OptionSource.TOOL, target="probe", effect=Effect(_NET)),
+        )
+        node = backward_chain(Goal(_NET), options, {})
+        assert node.actuation is not None
+        assert node.actuation.goal == "tool:probe"
+        assert node.actuation.payload == "probe"
+
     def test_two_step_via_guard(self) -> None:
         """Опция с guard → Sequence(подцель, действие)."""
         options = (

@@ -51,6 +51,12 @@ class TestBuildOptions:
 
         assert window.ids == ("tool:b", "tool:a")
 
+    def test_target_is_raw_affordance_name(self) -> None:
+        """id неймспейснут (tool:<name>), target = реальное имя тула."""
+        window = build_options([_affordance("get_weather"), _affordance("web_search")])
+
+        assert [o.target for o in window.options] == ["get_weather", "web_search"]
+
     def test_reversibility_carried_over(self) -> None:
         """Reversible аффорданса переносится в опцию."""
         window = build_options([_affordance("send_mail", reversible=False)])

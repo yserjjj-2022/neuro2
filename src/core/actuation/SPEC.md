@@ -45,8 +45,9 @@ class OptionSource(Enum):
 
 @dataclass(frozen=True)
 class Option:
-    id: str                       # стабильный: "tool:get_weather"
+    id: str                       # id в окне (неймспейс): "tool:get_weather"
     source: OptionSource
+    target: str = ""              # реальное имя вызова (имя MCP-тула); "" → id
     description: str = ""         # для привязки темы (этап 2) и трассы
     reversible: bool = False      # консервативный дефолт (ADR-0012 §4)
     cost: float = 0.0             # стоимость/латентность (оценка, не замер)
@@ -133,9 +134,11 @@ def select_option(
 ### Открытость окна
 
 `build_options` строит окно из runtime-возможностей: каждый `Affordance` →
-`Option(source=TOOL, id=f"tool:{name}")`. Порядок — порядок входа (стабильный).
-`descriptions` (если задан) наполняет `description` для привязки темы; иначе
-пусто (дефолт сохраняет работоспособность).
+`Option(source=TOOL, id=f"tool:{name}", target=name)`. `id` — неймспейс окна
+(`tool:<name>`, уникален среди встроенных/туловых опций), `target` — реальное
+имя тула для вызова (уходит в `Actuation.payload`; см. этап 3). Порядок —
+порядок входа (стабильный). `descriptions` (если задан) наполняет `description`
+для привязки темы; иначе пусто (дефолт сохраняет работоспособность).
 
 ## Этап 2. Факты и кондишены (дефолт + обогащение)
 
@@ -233,8 +236,8 @@ class ActuationStatus(Enum):
 @dataclass(frozen=True)
 class Actuation:
     kind: ActuationKind
-    goal: str                   # идентификатор цели/опции ("tool:get_weather")
-    payload: str = ""           # текст речи ИЛИ имя тула; аргументы — Shell
+    goal: str                   # id опции/цели в окне ("tool:get_weather")
+    payload: str = ""           # текст речи ИЛИ имя тула (Option.target); аргументы — Shell
 
 
 @dataclass(frozen=True)
@@ -272,7 +275,10 @@ def classify_reversible(annotations: ToolAnnotations, *, trusted: bool) -> bool:
     `community/local/нет → trusted=False`. Так `actuation` не импортирует
     `integrations` (без цикла зависимостей, PLAN §Зависимости).
 - **`Actuation`/`ActuationResult`** — единый контракт «текст vs тул»: общий
-  статус, разный payload. Исполнение (эффекторы, gate, шина) — Shell (этап 6).
+  статус, разный payload. `goal` — id опции в окне (неймспейс `tool:<name>`);
+  `payload` — реальное имя вызова (`Option.target`, имя MCP-тула; речь — текст).
+  Разделение важно: эффектор адресует аффорданс по `payload` (имя тула), а окно
+  и трасса — по `goal` (id). Исполнение (эффекторы, gate, шина) — Shell (этап 6).
 
 ### Границы этапа 3
 
@@ -399,8 +405,10 @@ def backward_chain(
     если цель не истинна);
   - исчерпан `max_depth` (горизонт) → `Condition`-узел на цель.
   Оба случая — честное «не знаю как» без фиктивной модели мира.
-- **`Action`-узел:** `Actuation(kind, goal=option.id, payload=option.id)`, где
-  `kind`: `TOOL → INVOKE_TOOL`, иначе `SPEAK`.
+- **`Action`-узел:** `Actuation(kind, goal=option.id, payload=option.target or
+  option.id)`, где `kind`: `TOOL → INVOKE_TOOL`, иначе `SPEAK`. `goal` — id окна
+  (трасса), `payload` — реальное имя вызова для эффектора (`target`); hand-built
+  опция без `target` откатывается на `id` (обратная совместимость).
 - **Чистота и детерминизм:** `backward_chain` — чистая функция; одинаковый вход
   → одинаковое дерево. `max_depth < 1` → `ValueError`.
 - **Защита от цикла:** рекурсия ограничена `max_depth` (guard, ведущий к тому же

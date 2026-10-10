@@ -32,8 +32,10 @@ class Option:
     """Одна возможность в окне выбора.
 
     Attributes:
-        id: Стабильный идентификатор ("tool:get_weather").
+        id: Стабильный идентификатор в окне ("tool:get_weather").
         source: Источник опции (тул/встроенная).
+        target: Реальное имя вызова (имя MCP-тула) — то, что шлётся эффектору
+            в ``Actuation.payload``; пусто → payload берётся из ``id``.
         description: Описание — для привязки темы (этап 2) и трассы.
         reversible: Обратимость; консервативный дефолт False (ADR-0012 §4).
         cost: Стоимость/латентность (оценка, не замер), >= 0.
@@ -44,6 +46,7 @@ class Option:
 
     id: str
     source: OptionSource
+    target: str = ""
     description: str = ""
     reversible: bool = False
     cost: float = 0.0

@@ -2021,6 +2021,9 @@ def classify_argument(
     объявлен эффект: тогда он **следует из подцели** (её достигает). Опция без
     эффекта — эпистемический дефолт; отсутствие в окне — выдуманное имя.
 
+    Сверка идёт по ``option.target`` (реальное имя вызова), с откатом на
+    ``option.id`` для hand-built опций без ``target``.
+
     Args:
         payload: Аргумент активации (имя тула / id опции).
         options: Опции окна, из которого выведена цепочка.
@@ -2029,7 +2032,7 @@ def classify_argument(
         :class:`ArgumentGrounding`.
     """
     for option in options:
-        if option.id == payload:
+        if (option.target or option.id) == payload:
             return (
                 ArgumentGrounding.GROUNDED
                 if option.effect is not None
@@ -2190,8 +2193,8 @@ class ChainScenario:
         options: Опции (обогащённые guard/effect) для генератора.
         facts: Снимок фактов мира на старте.
         expected_steps: Ожидаемое число шагов (None → не проверяется).
-        tool_dims: Ожидаемая схема тулов (id опции → длина данных); id без
-            записи → схема не проверяется.
+        tool_dims: Ожидаемая схема тулов (реальное имя тула → длина данных);
+            имя без записи → схема не проверяется.
 
     Raises:
         ValueError: Если id/goal_fact пусты или dim < 1.
@@ -2348,22 +2351,23 @@ class ChainHarness:
         speak: Callable[[Actuation], str | None] | None,
     ) -> ActuatorExecutor:
         """Собрать executor: gated тул-эффектор + речевой (Shell, §7.10)."""
-        tool_goals = {
-            option.id
+        # Имя аффорданса = реальное имя вызова (option.target): ToolEffector шлёт
+        # actuation.payload (= option.target) в ProbeRequest. Окно адресует опцию
+        # по id (`tool:<name>`), но эффектор — по имени тула.
+        tool_targets = {
+            option.target or option.id
             for option in scenario.options
             if option.source is OptionSource.TOOL
         }
-        # Имя аффорданса = option id: ToolEffector шлёт actuation.payload
-        # (= option id) в ProbeRequest, поэтому обрезать префикс нельзя.
         affordances = AffordanceMap(
             tuple(
                 Affordance(
-                    name=goal,
+                    name=target,
                     category=SignalCategory.EXTEROCEPTIVE,
                     reversible=True,
-                    dim=scenario.tool_dims.get(goal, 2),
+                    dim=scenario.tool_dims.get(target, 2),
                 )
-                for goal in sorted(tool_goals)
+                for target in sorted(tool_targets)
             )
         )
         effectors: dict[ActuationKind, Effector] = {}
@@ -2423,7 +2427,8 @@ class ChainHarness:
             gated=result.status is not ActuationStatus.PREEMPTED,
             form=form,
             data=result.data,
-            expected_dim=dims.get(actuation.goal),
+            # Схема тула ключуется реальным именем вызова (payload), а не id окна.
+            expected_dim=dims.get(actuation.payload),
         )
 
     def run_ablation(self, check: ChainAblationCheck) -> ChainAblationResult:
@@ -2484,20 +2489,23 @@ def default_chain_scenarios() -> tuple[ChainScenario, ...]:
             Option(
                 "tool:probe",
                 OptionSource.TOOL,
+                target="probe",
                 guard=Guard(topic, 0.5),
                 effect=Effect(net),
             ),
-            Option("tool:search", OptionSource.TOOL, effect=Effect(topic)),
+            Option("tool:search", OptionSource.TOOL, target="search", effect=Effect(topic)),
         ),
         expected_steps=2,
-        tool_dims={"tool:probe": 2, "tool:search": 3},
+        tool_dims={"probe": 2, "search": 3},
     )
     one_step = ChainScenario(
         id="chain.one_step.tool",
         goal_fact="report_ready",
-        options=(Option("tool:probe", OptionSource.TOOL, effect=Effect(net)),),
+        options=(
+            Option("tool:probe", OptionSource.TOOL, target="probe", effect=Effect(net)),
+        ),
         expected_steps=1,
-        tool_dims={"tool:probe": 2},
+        tool_dims={"probe": 2},
     )
     mixed = ChainScenario(
         id="chain.two_step.mixed",
@@ -2506,13 +2514,14 @@ def default_chain_scenarios() -> tuple[ChainScenario, ...]:
             Option(
                 "tool:probe",
                 OptionSource.TOOL,
+                target="probe",
                 guard=Guard(topic, 0.5),
                 effect=Effect(net),
             ),
             Option("say:topic", OptionSource.BUILTIN, effect=Effect(topic)),
         ),
         expected_steps=2,
-        tool_dims={"tool:probe": 2},
+        tool_dims={"probe": 2},
     )
     return (two_step, one_step, mixed)
 

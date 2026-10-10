@@ -634,14 +634,16 @@ ADR-0010 §7). Печатается **микроотчёт** и итог `summar
 транспорт → данные в `completed`), включая mock-MCP-транспорт (`ProbeTransport`
 поверх fake-клиента) и no-op при выключенном `ActuationConfig`.
 
-> **Шов именования аффордансов (открыто, BACKLOG S8).** Контракт «имя
-> аффорданса = `option.id`» (`build_options` даёт `tool:<name>`; `ToolEffector`
-> шлёт `payload` как имя аффорданса) сейчас согласован только внутри
-> `ChainHarness`. Runtime-карта из `to_affordances`/`default_affordances`
-> именует аффордансы **голым** именем тула (`web_search`), поэтому окно из
-> `build_options` через реальный wiring даёт `Failure` (`unknown affordance`).
-> До разрешения (единый префикс vs голое имя в `payload`) интеграционный тест
-> фиксирует рабочий контракт «имя аффорданса = `option.id`».
+> **Контракт именования аффордансов (решено, вариант A).** `Option.id` —
+> неймспейс окна (`tool:<name>`), `Option.target` — реальное имя вызова (имя
+> MCP-тула). `_action_for` кладёт `payload = target or id`, поэтому `ToolEffector`
+> шлёт реальное имя в `ProbeRequest`, а runtime-карта
+> (`to_affordances`/`default_affordances`/`ProbeTransport`) остаётся на реальных
+> именах — окно из `build_options` разрешается в probe без обрезки префикса.
+> `ChainHarness` именует карту `target`'ами, `classify_argument` сверяет payload
+> с `target`, схема тула (`tool_dims`) ключуется реальным именем. Раньше контракт
+> был согласован только внутри `ChainHarness` (имя = id); интеграционный тест
+> теперь проверяет сквозной путь на реальных именах.
 
 ---
 

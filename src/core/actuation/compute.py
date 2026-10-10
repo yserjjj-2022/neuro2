@@ -92,6 +92,7 @@ def build_options(
         Option(
             id=f"tool:{affordance.name}",
             source=OptionSource.TOOL,
+            target=affordance.name,
             description=desc.get(affordance.name, ""),
             reversible=affordance.reversible,
         )
@@ -388,7 +389,12 @@ def _goal_condition(goal: Goal) -> Node:
 
 
 def _action_for(option: Option) -> Node:
-    """Собрать Action-узел из опции (этап 5)."""
+    """Собрать Action-узел из опции (этап 5).
+
+    ``goal`` — id опции (неймспейс окна: ``tool:<name>``); ``payload`` — реальное
+    имя вызова (``option.target``, имя MCP-тула), иначе id. Эффектор адресует
+    аффорданс по payload, поэтому в карте аффордансов хранится ``target``.
+    """
     kind = (
         ActuationKind.INVOKE_TOOL
         if option.source is OptionSource.TOOL
@@ -397,7 +403,7 @@ def _action_for(option: Option) -> Node:
     return Node(
         NodeKind.ACTION,
         name=option.id,
-        actuation=Actuation(kind, option.id, option.id),
+        actuation=Actuation(kind, option.id, option.target or option.id),
     )
 
 

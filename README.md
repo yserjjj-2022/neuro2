@@ -85,9 +85,10 @@ VALIDATION §7.10 (инварианты звеньев 4–5, ablation, fidelity
 через `HostLoop.tick_actuation`). 1266 тестов.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
 
-**Открытый шов:** именование аффордансов (raw name vs `option.id`) — окно из
-`build_options` через реальный wiring пока не разрешается в probe; см. BACKLOG
-(S8) и VALIDATION §7.10.
+Именование аффордансов: `Option.id` — неймспейс окна (`tool:<name>`),
+`Option.target` — реальное имя вызова (уходит в `Actuation.payload`); окно из
+`build_options` разрешается в probe через реальный wiring (BACKLOG S8,
+VALIDATION §7.10).
 
 Цель и рамка — в [`INTENT.md`](INTENT.md): выращивание нейроперсоны, не
 программирование поведения.

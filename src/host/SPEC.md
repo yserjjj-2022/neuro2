@@ -679,7 +679,7 @@ def chain_shares(view) -> dict[str, float]: ...  # {"multi_step", "tool"}
 
 @dataclass(frozen=True)
 class ChainScenario: id; goal_fact; goal_value; options; facts; expected_steps;
-    tool_dims
+    tool_dims  # реальное имя тула (Option.target) → длина данных
     def goal(self) -> Goal: ...
     def tree(self, *, max_depth=3) -> Node: ...
 
@@ -715,11 +715,15 @@ Ablation выключает генератор (пустое окно) — це�
 `ProbeEffector`/gate → транспорт → данные в `completed`), включая mock-MCP
 (`ProbeTransport` поверх fake-клиента) и no-op при выключенном `ActuationConfig`.
 
-> **Шов именования (открыто).** Имя аффорданса = `option.id` (payload активации
-> шлётся как имя аффорданса), поэтому карта именуется `tool:<name>`. Runtime-карта
-> из `to_affordances`/`default_affordances` пока именует аффордансы голым именем
-> тула — окно из `build_options` через реальный wiring не разрешается в probe.
-> Деталь и варианты решения — BACKLOG (S8) и VALIDATION §7.10.
+**Контракт имён (вариант A, решено).** Карта аффордансов именуется **реальными**
+именами тулов (`probe`, `web_search`). Окно адресует опцию неймспейсом
+(`option.id = tool:<name>`), а реальное имя вызова лежит в `Option.target` и
+уходит в `Actuation.payload`; `ToolEffector` шлёт `payload` в `ProbeRequest`.
+Так окно из `build_options` разрешается в probe через реальный wiring
+(`to_affordances`/`default_affordances`/`ProbeTransport` не меняются).
+`ChainHarness` строит карту из `option.target`, `classify_argument` сверяет
+`payload` с `target` (откат на `id`), схема тула (`tool_dims`) ключуется
+реальным именем. Детали — BACKLOG (S8) и VALIDATION §7.10.
 
 ## Инварианты
 

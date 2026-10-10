@@ -7,8 +7,9 @@
 
 > **Статус: ✅ реализовано (шаги 0–9).** Открытое окно + тотальный скорер,
 > эффекты/BT/генератор (Core), эффекторы+executor+async (Shell), конфиг/
-> телеметрия/wiring, §7.10-валидация со сквозным прогоном. Открытый шов —
-> именование аффордансов (raw name vs `option.id`), см. BACKLOG (S8).
+> телеметрия/wiring, §7.10-валидация со сквозным прогоном. Именование
+> аффордансов закрыто (вариант A: `Option.id` — неймспейс окна, `Option.target`
+> — реальное имя вызова в `Actuation.payload`).
 
 Предпосылки: S3 (речь), S4 (policy, `CapabilityGate`), S6 (MCP-зондирование,
 `ProbeEffector`, `AffordanceMap`), S7 (b-тест, §7). Замыкает долг
@@ -444,8 +445,8 @@ replay**. Внутри прогона decision работает с заморо�
    (`TestChainIntegration` в `test_actuation_chain.py`).
 2. Синк `BUILD_ROADMAP.md`, `VALIDATION.md`, `SPECS.md`, `BACKLOG.md`,
    `README.md`, `adr/0012`.
-3. Открытый шов — именование аффордансов (raw name vs `option.id`): зафиксирован
-   в BACKLOG (S8) и VALIDATION §7.10, требует отдельного решения.
+3. Шов именования аффордансов закрыт (вариант A: `Option.id` — неймспейс окна,
+   `Option.target` — реальное имя вызова в `Actuation.payload`).
 
 ## План тестов
 

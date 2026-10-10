@@ -8,6 +8,7 @@ generator ablation (the chain collapses — non-tautological) and determinism.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,15 @@ class TestClassifyArgument:
     def test_unknown_name(self) -> None:
         options = (Option("tool:probe", OptionSource.TOOL, effect=Effect(_NET)),)
         assert classify_argument("tool:other", options) is ArgumentGrounding.UNKNOWN
+
+    def test_grounded_by_target(self) -> None:
+        """Сверка идёт по target (реальное имя), а не по id окна."""
+        options = (
+            Option("tool:probe", OptionSource.TOOL, target="probe", effect=Effect(_NET)),
+        )
+        assert classify_argument("probe", options) is ArgumentGrounding.GROUNDED
+        # id окна больше не считается аргументом, если объявлен target
+        assert classify_argument("tool:probe", options) is ArgumentGrounding.UNKNOWN
 
     def test_empty_window(self) -> None:
         assert classify_argument("tool:probe", ()) is ArgumentGrounding.UNKNOWN
@@ -513,9 +523,10 @@ class TestChainIntegration:
     генератором (``backward_chain``) и ведёт его через ``HostLoop.tick_actuation``
     (executor → ProbeEffector → gate → транспорт → данные в ``completed``).
 
-    Контракт имён: имя аффорданса = ``option.id`` (payload активации), поэтому
-    окно из ``build_options`` с ``tool:``-именами разрешается в probe без
-    обрезки префикса (см. хендофф-грабли).
+    Контракт имён (вариант A): карта аффордансов именуется **реальными** именами
+    тулов (``probe``); окно адресует опцию неймспейсом (``tool:probe``), а
+    ``option.target`` (= реальное имя) уходит в ``Actuation.payload``. Поэтому
+    окно из ``build_options`` разрешается в probe через реальный wiring.
     """
 
     def _loop(self, tmp_path: Path, amap: AffordanceMap, probe_fn: Any) -> Any:
@@ -531,12 +542,13 @@ class TestChainIntegration:
 
     def test_two_step_reaction_end_to_end(self, tmp_path: Path) -> None:
         """Цель достигается двумя тулами через реальный контур актуации."""
-        # Имя аффорданса = option.id (payload активации шлётся как имя аффорданса),
-        # поэтому карта именуется полными id — единый контракт с ChainHarness.
+        from src.core.actuation import build_options
+
+        # Карта — реальные имена тулов (как в реестре/`default_affordances`).
         amap = AffordanceMap(
             (
-                Affordance("tool:probe", SignalCategory.EXTEROCEPTIVE, True, 2),
-                Affordance("tool:search", SignalCategory.EXTEROCEPTIVE, True, 3),
+                Affordance("probe", SignalCategory.EXTEROCEPTIVE, True, 2),
+                Affordance("search", SignalCategory.EXTEROCEPTIVE, True, 3),
             )
         )
         calls: list[str] = []
@@ -547,15 +559,15 @@ class TestChainIntegration:
 
         loop = self._loop(tmp_path, amap, probe_fn)
         try:
+            window = build_options(amap.affordances)
+            assert window.ids == ("tool:probe", "tool:search")
             net, topic = Fact("report_ready"), Fact("topic_bound")
+            probe = window.find("tool:probe")
+            search = window.find("tool:search")
+            assert probe is not None and search is not None
             options = (
-                Option(
-                    "tool:probe",
-                    OptionSource.TOOL,
-                    guard=Guard(topic, 0.5),
-                    effect=Effect(net),
-                ),
-                Option("tool:search", OptionSource.TOOL, effect=Effect(topic)),
+                replace(probe, guard=Guard(topic, 0.5), effect=Effect(net)),
+                replace(search, effect=Effect(topic)),
             )
             tree = backward_chain(Goal(net), options, {})
 
@@ -571,12 +583,13 @@ class TestChainIntegration:
             assert goals == ["tool:search", "tool:probe"]
             assert all(r.status is ActuationStatus.SUCCESS for r in completed)
             assert [len(r.data) for r in completed] == [3, 2]
-            assert calls == ["tool:search", "tool:probe"]
+            # Эффектор адресует probe реальным именем тула, не id окна.
+            assert calls == ["search", "probe"]
         finally:
             loop.close()
 
-    def test_build_options_ids_are_prefixed(self) -> None:
-        """``build_options`` даёт id ``tool:<name>`` из имён аффордансов."""
+    def test_build_options_target_is_raw_name(self) -> None:
+        """``build_options``: id = ``tool:<name>``, target = реальное имя."""
         from src.core.actuation import build_options
 
         amap = AffordanceMap(
@@ -587,20 +600,27 @@ class TestChainIntegration:
         )
         window = build_options(amap.affordances)
         assert window.ids == ("tool:probe", "tool:search")
+        assert [o.target for o in window.options] == ["probe", "search"]
 
     def test_mock_mcp_transport_returns_data(self, tmp_path: Path) -> None:
         """Транспорт mock-MCP: вывод тула → вектор в шину (end-to-end)."""
+        from src.core.actuation import build_options
+
         client = _FakeMcpClient("hello")
+        # Маршрут транспорта — по реальному имени тула.
         transport = ProbeTransport(
-            {"tool:probe": (client, "probe", {})}  # type: ignore[dict-item]
+            {"probe": (client, "probe", {})}  # type: ignore[dict-item]
         )
         amap = AffordanceMap(
-            (Affordance("tool:probe", SignalCategory.EXTEROCEPTIVE, True, 4),)
+            (Affordance("probe", SignalCategory.EXTEROCEPTIVE, True, 4),)
         )
         loop = self._loop(tmp_path, amap, transport)
         try:
+            window = build_options(amap.affordances)
             net = Fact("report_ready")
-            options = (Option("tool:probe", OptionSource.TOOL, effect=Effect(net)),)
+            option = window.find("tool:probe")
+            assert option is not None
+            options = (replace(option, effect=Effect(net)),)
             tree = backward_chain(Goal(net), options, {})
 
             completed: list[Any] = []
