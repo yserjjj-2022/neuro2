@@ -269,7 +269,9 @@ class SpeechEffector(DeferredEffector):
 
 - `start` — начать активацию; работа **не** выполняется здесь (не блокирует тик).
 - `poll` — текущий `ActuationResult`: `Running`, пока не истёк `latency_ticks`,
-  затем работа выполняется **один раз** и кэшируется.
+  затем работа выполняется **один раз** и кэшируется. Завершённый результат
+  привязывается к активации (`actuation=...`) — для трассы/§7.10; речевой
+  эффектор кладёт текст в `ActuationResult.text`.
 - `preempt` — прервать: статус → `Preempted`, активация сбрасывается.
 - `ToolEffector` зовёт `ProbeEffector.probe` (через gate); отказ/сбой → `Failure`.
 - `SpeechEffector` зовёт инъецированный `speak`; `None` → `Failure`.
@@ -295,6 +297,8 @@ class ActuatorExecutor:
     def tick(self, root: Node, facts: Mapping[str, float]) -> ExecutorOutcome: ...
     @property
     def done(self) -> bool: ...
+    @property
+    def statuses(self) -> dict[str, NodeStatus]: ...  # исходы goal → статус
 ```
 
 Алгоритм тика:
@@ -648,6 +652,63 @@ class FidelityHarness:
 перевёрнут), фабрикация (сигнал добавлен). CI — детерминированный responder +
 `LexiconToneScorer`; реальная LLM/эмбеддеры — opt-in. LLM-as-judge для ворот не
 используется (ADR-0007).
+
+## Sequenced reaction harness (behavioral_chain.py, VALIDATION §7.10)
+
+Обобщает звенья 4–5 со «одной реплики/LLM-вызова» на **сложную реакцию**: одна
+цель, достигаемая несколькими актуациями (текст и/или тул), цепочкой 2–3 шагов.
+Шаг — актуация + исход + наблюдаемая форма результата; инвариант — «каждый
+решённый шаг прошёл gate и завершился» (выводится точно, не тавтология).
+
+```python
+class StepForm(Enum): EMPTY; TEXT; TOOL
+class ChainInvariant(Enum): STEP_GATED; STEP_COMPLETED; FORM_MATCHES_KIND;
+    SCHEMA_MATCHES_DIM; STEP_COUNT; ARGUMENT_GROUNDED
+class ArgumentGrounding(Enum): GROUNDED; EPISTEMIC; UNKNOWN
+
+@dataclass(frozen=True)
+class ChainStep: actuation; status; gated; form; data; expected_dim
+@dataclass(frozen=True)
+class ChainView: steps; decided; completed; tool_steps; options; expected_steps
+    # prop: multi_step
+
+def classify_step_form(*, status, text, data) -> StepForm: ...
+def classify_argument(payload, options) -> ArgumentGrounding: ...
+def check_chain(view, invariants) -> tuple[str, ...]: ...
+def chain_shares(view) -> dict[str, float]: ...  # {"multi_step", "tool"}
+
+@dataclass(frozen=True)
+class ChainScenario: id; goal_fact; goal_value; options; facts; expected_steps;
+    tool_dims
+    def goal(self) -> Goal: ...
+    def tree(self, *, max_depth=3) -> Node: ...
+
+class ChainAblation(Enum): GENERATOR
+@dataclass(frozen=True)
+class ChainAblationCheck: id; scenario; mechanism; expect_change
+@dataclass(frozen=True)
+class ChainAblationResult: check; baseline_steps; ablated_steps; changed;
+    passed; reason
+
+class ChainHarness:
+    def __init__(self, *, max_ticks=32) -> None: ...
+    def run(self, scenario, *, max_depth=3, speak=None) -> ChainView: ...
+    def run_ablation(self, check) -> ChainAblationResult: ...
+
+def default_chain_scenarios() -> tuple[ChainScenario, ...]: ...
+def default_chain_ablations() -> tuple[ChainAblationCheck, ...]: ...
+```
+
+`ChainHarness` (Shell) строит детерминированный BT из `ChainScenario`
+генератором (`backward_chain`) и ведёт его `ActuatorExecutor`'ом (gated
+tool-эффектор + речевой) до терминального статуса. Схема данных тула
+(`tool_dims`) и ожидаемое число шагов (`expected_steps`) задаются сценарием;
+аргумент tool-шага сверяется с окном (`ARGUMENT_GROUNDED` — имя тула должно
+называть опцию с объявленным эффектом, fidelity-ось §7.10). Корпус покрывает
+двухшаговую tool-цепочку, одношаговую и **смешанную** (speak + tool).
+Ablation выключает генератор (пустое окно) — цепочка схлопывается; изменение
+наблюдаемого подтверждает атрибуцию (анти-тавтология). Вход — pytest-гейт
+(`test_actuation_chain.py`).
 
 ## Инварианты
 

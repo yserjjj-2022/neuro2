@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
 from src.core.actuation import (
@@ -116,6 +117,10 @@ class DeferredEffector:
         except Exception as exc:  # noqa: BLE001 — сбой эффектора не роняет тик
             logger.error("effector failed: %s (%s)", self._actuation.goal, exc)
             self._result = ActuationResult(ActuationStatus.FAILURE)
+        # Привязать активацию к результату (трасса/§7.10) — аддитивно, не
+        # перезаписывая уже проставленную работу (совместимость с тестами).
+        if self._result.actuation is None:
+            self._result = replace(self._result, actuation=self._actuation)
         return self._result
 
     def preempt(self) -> None:
@@ -176,4 +181,4 @@ class SpeechEffector(DeferredEffector):
         status = (
             ActuationStatus.SUCCESS if text is not None else ActuationStatus.FAILURE
         )
-        return ActuationResult(status)
+        return ActuationResult(status, text=text)

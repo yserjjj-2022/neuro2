@@ -57,6 +57,20 @@ Functional Core (pure, ADR-0004):
   :class:`LexiconToneScorer` / :class:`EmbeddingToneScorer` /
   :class:`FidelityPair` / :class:`FidelityResult` / :func:`check_fidelity` —
   transducer fidelity (VALIDATION §7.6).
+ * :class:`StepForm` / :class:`ChainStep` / :class:`ChainInvariant` /
+  :class:`ChainView` / :func:`check_chain` / :func:`chain_shares` — link 4–5
+  generalization to a **sequenced reaction** (VALIDATION §7.10): every step
+  passed the gate and completed iff decided, the result form matches the
+  step's intent (text vs tool), the tool data matches the expected schema
+  (dim), the step count matches the expectation, and the tool argument follows
+  from its subgoal (fidelity axis).
+ * :class:`ArgumentGrounding` / :func:`classify_argument` — the fidelity axis
+  "tool argument follows from the subgoal" (§7.10): the argument must name a
+  window option with a declared effect, not an epistemic default or a
+  fabricated name.
+ * :class:`ChainScenario` / :class:`ChainAblation` / :class:`ChainAblationCheck` /
+  :class:`ChainAblationResult` — sequenced-reaction cells and the generator
+  ablation (disable the generator → the chain collapses to one actuation).
 
 Imperative Shell:
 
@@ -72,6 +86,9 @@ Imperative Shell:
 * :class:`RecordingLlmClient` — a fake LLM that records every call and returns a
   goal-structured deterministic reply.
 * :class:`FidelityHarness` — drives an injected responder over fidelity pairs.
+* :class:`ChainHarness` — drives a derived BT through the ``ActuatorExecutor``
+  (gated tool effector + speech effector), collecting ``ChainView`` per run and
+  the generator ablation (VALIDATION §7.10).
 
 Not covered yet (by design): ToM (``partner`` is ``None`` → S4-compat).
 """
@@ -88,10 +105,30 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from src.config import HostConfig, load_preset
+from src.core.actuation import (
+    Actuation,
+    ActuationKind,
+    ActuationResult,
+    ActuationStatus,
+    Effect,
+    Fact,
+    Goal,
+    Guard,
+    Node,
+    Option,
+    OptionSource,
+    backward_chain,
+)
 from src.core.policy import Action, PolicyTrace, select_action
+from src.host.effectors import Effector, SpeechEffector, ToolEffector
+from src.host.executor import ActuatorExecutor
 from src.host.fingerprint import FINGERPRINT_METRICS, behavioral_fingerprint
+from src.host.gate import Capability, CapabilityGate, CapabilityTier
 from src.host.loop import HostLoop, build_host_loop
+from src.host.probe import ProbeEffector
 from src.host.sensitivity import DeterministicMeter
+from src.mcp.models import SignalCategory
+from src.mcp.probe import Affordance, AffordanceMap
 from src.memory.embedder import Embedder
 from src.speech.controller import SpeechController, SpeechDecision
 from src.speech.intent import (
@@ -1894,6 +1931,605 @@ def compare_to_baseline(
                 )
             )
     return tuple(deviations)
+
+
+# --- Sequenced reaction harness (VALIDATION §7.10) ----------------------------
+#
+# Generalizes links 4–5 from "the LLM is called iff we speak" to a **complex
+# reaction**: one goal reached through several actuations (text and/or tool),
+# a short chain of 2–3 steps. A *step* is an ``Actuation`` plus its outcome and
+# the observable form of its result; the invariant is "every step passed the
+# gate and completed iff it was decided". The generator ablation is
+# non-tautological: disabling the generator collapses the chain to one step.
+
+
+class StepForm(Enum):
+    """Наблюдаемая форма результата шага актуации (звено 5, §7.10).
+
+        EMPTY — результата нет (не решён/сбой);
+        TEXT — непустой текст (речь);
+        TOOL — данные тула (непустой payload результата).
+    """
+
+    EMPTY = "empty"
+    TEXT = "text"
+    TOOL = "tool"
+
+
+# Какие формы допустимы для вида актуации. Речь → текст; тул → данные.
+_KIND_STEP_FORMS: dict[ActuationKind, frozenset[StepForm]] = {
+    ActuationKind.SPEAK: frozenset({StepForm.TEXT}),
+    ActuationKind.INVOKE_TOOL: frozenset({StepForm.TOOL}),
+}
+
+
+class ChainInvariant(Enum):
+    """Наблюдаемое свойство цепочки актуаций (звенья 4–5, §7.10).
+
+        STEP_GATED — каждый решённый шаг прошёл gate (не отсечён отказом);
+        STEP_COMPLETED — каждый решённый шаг завершился (Success), либо сбой
+            честно зафиксирован (хост не падает, VALIDATION §7.3);
+        FORM_MATCHES_KIND — форма результата шага соответствует виду актуации
+            (речь → текст, тул → данные);
+        SCHEMA_MATCHES_DIM — данные успешного tool-шага совпадают с ожидаемой
+            схемой (длиной), если схема объявлена (звено 5, §7.10);
+        STEP_COUNT — число шагов цепочки совпадает с ожидаемым, если оно
+            объявлено (``ChainScenario.expected_steps``);
+        ARGUMENT_GROUNDED — аргумент tool-шага следует из подцели: имя тула
+            называет опцию окна с объявленным эффектом (не эпистемический
+            дефолт и не выдуманное имя; fidelity-ось §7.10).
+    """
+
+    STEP_GATED = "step_gated"
+    STEP_COMPLETED = "step_completed"
+    FORM_MATCHES_KIND = "form_matches_kind"
+    SCHEMA_MATCHES_DIM = "schema_matches_dim"
+    STEP_COUNT = "step_count"
+    ARGUMENT_GROUNDED = "argument_grounded"
+
+
+_DEFAULT_CHAIN_INVARIANTS: tuple[ChainInvariant, ...] = (
+    ChainInvariant.STEP_GATED,
+    ChainInvariant.STEP_COMPLETED,
+    ChainInvariant.FORM_MATCHES_KIND,
+    ChainInvariant.SCHEMA_MATCHES_DIM,
+    ChainInvariant.STEP_COUNT,
+    ChainInvariant.ARGUMENT_GROUNDED,
+)
+
+
+class ArgumentGrounding(Enum):
+    """Следует ли аргумент тула из подцели (fidelity-ось §7.10).
+
+        GROUNDED — имя тула называет опцию окна с объявленным эффектом
+            (аргумент выведен из подцели, а не выдуман);
+        EPISTEMIC — опция найдена, но эффект не объявлен (эпистемический дефолт);
+        UNKNOWN — имени нет в окне (выдуманный/несогласованный аргумент).
+    """
+
+    GROUNDED = "grounded"
+    EPISTEMIC = "epistemic"
+    UNKNOWN = "unknown"
+
+
+def classify_argument(
+    payload: str, options: Sequence[Option]
+) -> ArgumentGrounding:
+    """Классифицировать grounding аргумента тула (чистая, §7.10).
+
+    Аргумент (payload активации) должен называть опцию окна, у которой
+    объявлен эффект: тогда он **следует из подцели** (её достигает). Опция без
+    эффекта — эпистемический дефолт; отсутствие в окне — выдуманное имя.
+
+    Args:
+        payload: Аргумент активации (имя тула / id опции).
+        options: Опции окна, из которого выведена цепочка.
+
+    Returns:
+        :class:`ArgumentGrounding`.
+    """
+    for option in options:
+        if option.id == payload:
+            return (
+                ArgumentGrounding.GROUNDED
+                if option.effect is not None
+                else ArgumentGrounding.EPISTEMIC
+            )
+    return ArgumentGrounding.UNKNOWN
+
+
+@dataclass(frozen=True)
+class ChainStep:
+    """Один шаг сложной реакции: актуация + исход + форма результата (§7.10).
+
+    Attributes:
+        actuation: Выполненная (решённая) актуация.
+        status: Исход шага (``Success``/``Failure``/``Preempted``).
+        gated: Прошёл ли шаг gate (True — разрешён; отказ → False).
+        form: Наблюдаемая форма результата.
+        data: Данные результата (тул) — для проверки формы.
+        expected_dim: Ожидаемая длина данных тула (схема), None → не объявлена.
+    """
+
+    actuation: Actuation
+    status: ActuationStatus
+    gated: bool
+    form: StepForm
+    data: tuple[float, ...] = ()
+    expected_dim: int | None = None
+
+
+def classify_step_form(
+    *, status: ActuationStatus, text: str | None, data: tuple[float, ...]
+) -> StepForm:
+    """Классифицировать форму результата шага (чистая, §7.10).
+
+    Args:
+        status: Исход шага.
+        text: Текст реплики (для речи), None — нет.
+        data: Данные результата (для тула).
+
+    Returns:
+        ``EMPTY`` при сбое/пустом результате, иначе ``TEXT`` или ``TOOL``.
+    """
+    if status is not ActuationStatus.SUCCESS:
+        return StepForm.EMPTY
+    if text is not None and text.strip():
+        return StepForm.TEXT
+    if data:
+        return StepForm.TOOL
+    return StepForm.EMPTY
+
+
+@dataclass(frozen=True)
+class ChainView:
+    """Снимок сложной реакции: последовательность шагов и решение (§7.10).
+
+    Attributes:
+        steps: Решённые шаги в порядке исполнения.
+        decided: Сколько шагов было решено (из дерева/цели).
+        completed: Сколько шагов завершилось ``Success``.
+        tool_steps: Сколько шагов были tool-актуациями.
+        options: Опции окна, из которого выведена цепочка (для grounding
+            аргумента тула).
+        expected_steps: Ожидаемое число шагов (None → не проверяется).
+    """
+
+    steps: tuple[ChainStep, ...]
+    decided: int
+    completed: int
+    tool_steps: int
+    options: tuple[Option, ...] = ()
+    expected_steps: int | None = None
+
+    @property
+    def multi_step(self) -> bool:
+        """Была ли реакция многошаговой (> 1 решённого шага)."""
+        return self.decided > 1
+
+
+def check_chain(
+    view: ChainView, invariants: Sequence[ChainInvariant]
+) -> tuple[str, ...]:
+    """Проверить инварианты цепочки актуаций (чистая, §7.10).
+
+    Args:
+        view: Снимок цепочки.
+        invariants: Проверяемые инварианты.
+
+    Returns:
+        Кортеж имён нарушенных инвариантов (пусто → всё выполнено).
+    """
+    violated: list[str] = []
+    for invariant in invariants:
+        if invariant is ChainInvariant.STEP_GATED:
+            ok = all(step.gated for step in view.steps)
+        elif invariant is ChainInvariant.STEP_COMPLETED:
+            ok = view.completed == len(view.steps)
+        elif invariant is ChainInvariant.FORM_MATCHES_KIND:
+            ok = all(
+                step.form is StepForm.EMPTY
+                or step.form in _KIND_STEP_FORMS.get(step.actuation.kind, frozenset())
+                for step in view.steps
+            )
+        elif invariant is ChainInvariant.SCHEMA_MATCHES_DIM:
+            ok = all(
+                step.expected_dim is None
+                or step.form is not StepForm.TOOL
+                or len(step.data) == step.expected_dim
+                for step in view.steps
+            )
+        elif invariant is ChainInvariant.STEP_COUNT:
+            ok = (
+                view.expected_steps is None
+                or view.decided == view.expected_steps
+            )
+        elif invariant is ChainInvariant.ARGUMENT_GROUNDED:
+            ok = all(
+                step.actuation.kind is not ActuationKind.INVOKE_TOOL
+                or classify_argument(step.actuation.payload, view.options)
+                is ArgumentGrounding.GROUNDED
+                for step in view.steps
+            )
+        else:  # pragma: no cover — все члены перечислены
+            ok = True
+        if not ok:
+            violated.append(invariant.value)
+    return tuple(violated)
+
+
+def chain_shares(view: ChainView) -> dict[str, float]:
+    """Доли наблюдаемых цепочки без точного эталона (чистая, §7.10).
+
+    Доля многошаговых реакций и доля tool-актуаций — наблюдаемые (калибруются
+    по эталону, не проверяются). Доля считается от решённых шагов.
+
+    Args:
+        view: Снимок цепочки.
+
+    Returns:
+        Отображение ``операция → доля`` (``multi_step``/``tool``).
+    """
+    total = len(view.steps)
+    if total == 0:
+        return {"multi_step": 0.0, "tool": 0.0}
+    return {
+        "multi_step": (1.0 if view.multi_step else 0.0),
+        "tool": view.tool_steps / total,
+    }
+
+
+@dataclass(frozen=True)
+class ChainScenario:
+    """Ячейка теста сложной реакции (§7.10).
+
+    Attributes:
+        id: Идентификатор.
+        goal_fact: Имя факта цели (что делаем истинным).
+        goal_value: Целевое значение факта ∈ [0, 1].
+        options: Опции (обогащённые guard/effect) для генератора.
+        facts: Снимок фактов мира на старте.
+        expected_steps: Ожидаемое число шагов (None → не проверяется).
+        tool_dims: Ожидаемая схема тулов (id опции → длина данных); id без
+            записи → схема не проверяется.
+
+    Raises:
+        ValueError: Если id/goal_fact пусты или dim < 1.
+    """
+
+    id: str
+    goal_fact: str
+    goal_value: float = 1.0
+    options: tuple[Option, ...] = ()
+    facts: Mapping[str, float] = field(default_factory=lambda: dict[str, float]())
+    expected_steps: int | None = None
+    tool_dims: Mapping[str, int] = field(default_factory=lambda: dict[str, int]())
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("chain scenario id must not be empty")
+        if not self.goal_fact:
+            raise ValueError("chain scenario goal_fact must not be empty")
+        for option_id, dim in self.tool_dims.items():
+            if dim < 1:
+                raise ValueError(
+                    f"tool dim must be >= 1 for {option_id!r}, got {dim}"
+                )
+
+    def goal(self) -> Goal:
+        """Цель-исход сценария (чистая)."""
+        return Goal(Fact(self.goal_fact), self.goal_value)
+
+    def tree(self, *, max_depth: int = 3) -> Node:
+        """Вывести дерево сценария генератором (чистая, §7.10)."""
+        return backward_chain(self.goal(), self.options, dict(self.facts), max_depth=max_depth)
+
+
+class ChainAblation(Enum):
+    """Выключаемый механизм цепочки для проверки атрибуции (§7.10).
+
+        GENERATOR — выключить генератор (пустое окно) → цепочка схлопывается
+            до одной актуации (Condition на цель вместо Sequence).
+    """
+
+    GENERATOR = "generator"
+
+
+def _ablate_chain_options(options: tuple[Option, ...]) -> tuple[Option, ...]:
+    """Выключить генератор: убрать эффекты (окно не строит цепочку)."""
+    return tuple(
+        replace(option, effect=None) if option.effect is not None else option
+        for option in options
+    )
+
+
+@dataclass(frozen=True)
+class ChainAblationCheck:
+    """Проверка атрибуции генератора цепочки (§7.10).
+
+    Attributes:
+        id: Идентификатор.
+        scenario: Сценарий-носитель.
+        mechanism: Выключаемый механизм.
+        expect_change: Должно ли наблюдаемое измениться (анти-тавтология).
+
+    Raises:
+        ValueError: Если id пуст.
+    """
+
+    id: str
+    scenario: ChainScenario
+    mechanism: ChainAblation = ChainAblation.GENERATOR
+    expect_change: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("chain ablation id must not be empty")
+
+
+@dataclass(frozen=True)
+class ChainAblationResult:
+    """Итог ablation генератора цепочки (§7.10).
+
+    Attributes:
+        check: Проверка.
+        baseline_steps: Число шагов с генератором.
+        ablated_steps: Число шагов без генератора.
+        changed: Изменилось ли наблюдаемое.
+        passed: Выполнено ли ожидание.
+        reason: Причина вердикта.
+    """
+
+    check: ChainAblationCheck
+    baseline_steps: int
+    ablated_steps: int
+    changed: bool
+    passed: bool
+    reason: str
+
+
+def _build_chain_probe(
+    affordances: AffordanceMap,
+) -> ProbeEffector:
+    """Собрать gated probe-эффектор для цепочки (Shell, §7.10)."""
+    return ProbeEffector(
+        affordances=affordances,
+        gate=CapabilityGate(
+            max_tier=CapabilityTier.T4,
+            granted=frozenset(
+                {Capability.READ, Capability.ACT_REVERSIBLE}
+            ),
+        ),
+    )
+
+
+class ChainHarness:
+    """Shell: прогон сложной реакции через ``ActuatorExecutor`` (§7.10).
+
+    Строит детерминированный BT из ``ChainScenario`` генератором, ведёт его
+    эффекторами (gated тул + речь) до терминального статуса, собирает шаги в
+    ``ChainView`` и проверяет инварианты звеньев 4–5. Ablation выключает
+    генератор (пустое окно) — цепочка схлопывается до одной актуации.
+
+    Attributes:
+        max_ticks: Предохранитель от незавершающегося дерева.
+    """
+
+    def __init__(self, *, max_ticks: int = 32) -> None:
+        if max_ticks < 1:
+            raise ValueError(f"max_ticks must be >= 1, got {max_ticks}")
+        self.max_ticks = max_ticks
+
+    def run(
+        self,
+        scenario: ChainScenario,
+        *,
+        max_depth: int = 3,
+        speak: Callable[[Actuation], str | None] | None = None,
+    ) -> ChainView:
+        """Прогнать сценарий и вернуть снимок цепочки.
+
+        Args:
+            scenario: Сценарий сложной реакции.
+            max_depth: Горизонт генератора.
+            speak: Функция речи (None → детерминированная заглушка).
+
+        Returns:
+            :class:`ChainView` с решёнными шагами.
+        """
+        tree = scenario.tree(max_depth=max_depth)
+        executor = self._executor(scenario, speak=speak)
+        return self._drive(tree, executor, scenario)
+
+    def _executor(
+        self,
+        scenario: ChainScenario,
+        *,
+        speak: Callable[[Actuation], str | None] | None,
+    ) -> ActuatorExecutor:
+        """Собрать executor: gated тул-эффектор + речевой (Shell, §7.10)."""
+        tool_goals = {
+            option.id
+            for option in scenario.options
+            if option.source is OptionSource.TOOL
+        }
+        # Имя аффорданса = option id: ToolEffector шлёт actuation.payload
+        # (= option id) в ProbeRequest, поэтому обрезать префикс нельзя.
+        affordances = AffordanceMap(
+            tuple(
+                Affordance(
+                    name=goal,
+                    category=SignalCategory.EXTEROCEPTIVE,
+                    reversible=True,
+                    dim=scenario.tool_dims.get(goal, 2),
+                )
+                for goal in sorted(tool_goals)
+            )
+        )
+        effectors: dict[ActuationKind, Effector] = {}
+        if affordances.affordances:
+            effectors[ActuationKind.INVOKE_TOOL] = ToolEffector(
+                _build_chain_probe(affordances)
+            )
+        effectors[ActuationKind.SPEAK] = SpeechEffector(
+            speak if speak is not None else _default_speak
+        )
+        return ActuatorExecutor(effectors=effectors, expected_ticks=1)
+
+    def _drive(
+        self,
+        tree: Node,
+        executor: ActuatorExecutor,
+        scenario: ChainScenario,
+    ) -> ChainView:
+        """Вести дерево до терминального статуса, собрать шаги (§7.10)."""
+        dims = dict(scenario.tool_dims)
+        steps: list[ChainStep] = []
+        decided = 0
+        for _ in range(self.max_ticks):
+            outcome = executor.tick(tree, dict(scenario.facts))
+            for result in outcome.completed:
+                steps.append(self._to_step(result, dims))
+            decided = max(decided, len(steps))
+            if executor.done:
+                break
+        completed = sum(1 for s in steps if s.status is ActuationStatus.SUCCESS)
+        tool_steps = sum(
+            1 for s in steps if s.actuation.kind is ActuationKind.INVOKE_TOOL
+        )
+        return ChainView(
+            steps=tuple(steps),
+            decided=decided,
+            completed=completed,
+            tool_steps=tool_steps,
+            options=scenario.options,
+            expected_steps=scenario.expected_steps,
+        )
+
+    @staticmethod
+    def _to_step(
+        result: ActuationResult, dims: Mapping[str, int]
+    ) -> ChainStep:
+        """Перевести результат активации в шаг цепочки (чистая, §7.10)."""
+        actuation = result.actuation
+        if actuation is None:  # недостижимо: executor привязывает активацию
+            raise ValueError("completed actuation has no actuation attached")
+        form = classify_step_form(
+            status=result.status, text=result.text, data=result.data
+        )
+        return ChainStep(
+            actuation=actuation,
+            status=result.status,
+            gated=result.status is not ActuationStatus.PREEMPTED,
+            form=form,
+            data=result.data,
+            expected_dim=dims.get(actuation.goal),
+        )
+
+    def run_ablation(self, check: ChainAblationCheck) -> ChainAblationResult:
+        """Проверить атрибуцию генератора: выключить → цепочка схлопывается.
+
+        Args:
+            check: Проверка атрибуции.
+
+        Returns:
+            :class:`ChainAblationResult` с обоими наблюдаемыми и вердиктом.
+        """
+        scenario = check.scenario
+        baseline = self.run(scenario)
+        ablated_options = _ablate_chain_options(scenario.options)
+        ablated_scenario = replace(scenario, options=ablated_options)
+        ablated = self.run(ablated_scenario)
+        changed = baseline.decided != ablated.decided
+        passed = changed == check.expect_change
+        verdict = "changed" if changed else "unchanged"
+        expectation = "change" if check.expect_change else "no change"
+        status = "ok" if passed else "unexpected"
+        return ChainAblationResult(
+            check=check,
+            baseline_steps=baseline.decided,
+            ablated_steps=ablated.decided,
+            changed=changed,
+            passed=passed,
+            reason=(
+                f"{check.mechanism.value}: {verdict} (expected {expectation}) — "
+                f"{status}; baseline={baseline.decided}, ablated={ablated.decided}"
+            ),
+        )
+
+
+def _default_speak(_actuation: Actuation) -> str:
+    """Детерминированная заглушка речи для цепочки (Shell, §7.10)."""
+    return "Понял, выполняю."
+
+
+def default_chain_scenarios() -> tuple[ChainScenario, ...]:
+    """Встроенный корпус сложных реакций (§7.10).
+
+    Двухшаговая tool-реакция: цель ``report_ready`` достигается тулом
+    ``probe``, которому предшествует тул ``search`` (guard ``topic_bound``).
+    Одношаговая: цель без guard — один тул. Смешанная (speak + tool): подцель
+    достигается встроенным речевым действием (SPEAK), затем — тулом (TOOL),
+    так что ``StepForm.TEXT`` тоже покрыт корпусом.
+
+    Returns:
+        Кортеж :class:`ChainScenario`.
+    """
+    net = Fact("report_ready")
+    topic = Fact("topic_bound")
+    two_step = ChainScenario(
+        id="chain.two_step.tool",
+        goal_fact="report_ready",
+        options=(
+            Option(
+                "tool:probe",
+                OptionSource.TOOL,
+                guard=Guard(topic, 0.5),
+                effect=Effect(net),
+            ),
+            Option("tool:search", OptionSource.TOOL, effect=Effect(topic)),
+        ),
+        expected_steps=2,
+        tool_dims={"tool:probe": 2, "tool:search": 3},
+    )
+    one_step = ChainScenario(
+        id="chain.one_step.tool",
+        goal_fact="report_ready",
+        options=(Option("tool:probe", OptionSource.TOOL, effect=Effect(net)),),
+        expected_steps=1,
+        tool_dims={"tool:probe": 2},
+    )
+    mixed = ChainScenario(
+        id="chain.two_step.mixed",
+        goal_fact="report_ready",
+        options=(
+            Option(
+                "tool:probe",
+                OptionSource.TOOL,
+                guard=Guard(topic, 0.5),
+                effect=Effect(net),
+            ),
+            Option("say:topic", OptionSource.BUILTIN, effect=Effect(topic)),
+        ),
+        expected_steps=2,
+        tool_dims={"tool:probe": 2},
+    )
+    return (two_step, one_step, mixed)
+
+
+def default_chain_ablations() -> tuple[ChainAblationCheck, ...]:
+    """Встроенный корпус ablation генератора цепочки (§7.10).
+
+    Returns:
+        Кортеж :class:`ChainAblationCheck`.
+    """
+    return (
+        ChainAblationCheck(
+            id="ablate.chain.generator",
+            scenario=default_chain_scenarios()[0],
+            mechanism=ChainAblation.GENERATOR,
+        ),
+    )
 
 
 # --- Fidelity harness (VALIDATION §7.6) --------------------------------------

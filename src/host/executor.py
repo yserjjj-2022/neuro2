@@ -118,6 +118,15 @@ class ActuatorExecutor:
         """Завершено ли дерево (``Success``/``Failure``)."""
         return self._done
 
+    @property
+    def statuses(self) -> dict[str, NodeStatus]:
+        """Исходы активаций по ``goal`` (снимок для телеметрии/§7).
+
+        Returns:
+            Копия накопителя терминальных исходов (goal → статус узла).
+        """
+        return dict(self._statuses)
+
     def _reset(self, root: Node) -> int:
         """Сбросить состояние при смене дерева (преемпция, fail-safe).
 

@@ -241,6 +241,8 @@ class Actuation:
 class ActuationResult:
     status: ActuationStatus
     data: tuple[float, ...] = ()  # данные-результат → в шину (Shell, этап 6)
+    actuation: Actuation | None = None  # активация-источник (трасса/§7.10)
+    text: str | None = None             # текст реплики (для речи, §7.10)
 
 
 @dataclass(frozen=True)

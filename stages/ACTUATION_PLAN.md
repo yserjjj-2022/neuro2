@@ -414,7 +414,7 @@ replay**. Внутри прогона decision работает с заморо�
 4. Тесты: конфиг валидация; телеметрия сериализуется; `enabled=False` →
    контур идентичен; CLI-флаг.
 
-### Шаг 8. §7: обобщение звена 4 + ablation
+### Шаг 8. §7: обобщение звена 4 + ablation ✅
 
 1. Звено 4: «LLM вызван ⇔ решение говорить» → **«каждый шаг актуации прошёл
    gate и завершился ⇔ решён»** (инвариант, выводим точно).
@@ -424,6 +424,11 @@ replay**. Внутри прогона decision работает с заморо�
 4. Fidelity: ось «аргументы тула следуют из подцели».
 5. Эталон наблюдаемых: доля многошаговых реакций / доля tool-актуаций —
    наблюдаемые (калибруются, не проверяются).
+
+Реализовано: секция «Sequenced reaction harness» в `host/behavioral_chain.py`
+(`ChainStep`/`ChainView`/`ChainInvariant`/`check_chain`/`chain_shares`,
+`ArgumentGrounding`/`classify_argument`, `ChainScenario`/`ChainHarness`/
+`ChainAblation*`), pytest-гейт `src/tests/test_actuation_chain.py`.
 
 ### Шаг 9. Валидация
 
@@ -446,6 +451,7 @@ replay**. Внутри прогона decision работает с заморо�
 | `test_telemetry_actuation_*` | телеметрия | сериализация |
 | `test_actuation_disabled_compat` | совместимость | S7 идентичен |
 | `test_actuation_ablation_generator` | §7 | цепочка схлопывается |
+| `test_actuation_chain_*` | §7.10 | инварианты шага/цепочки, схема тула, grounding аргумента, ablation, детерминизм |
 
 ## Заметки
 
@@ -488,11 +494,12 @@ BT реактивен by construction, «второго executive» нет; ме
 
 План зафиксирован (обсуждение 2026-10-08), **уточнён 2026-10-09** (сдвиг
 фундамента на выбор; см. «Сдвиг фундамента»). **ADR-0012 принят** (2026-10-09).
-Реализованы шаги 0–7 (Core-окно/скорер/факты/эффекты/BT/генератор, Shell-
-эффекторы+executor, конфиг/телеметрия/wiring). Остаются шаги 8 (§7-обобщение +
-ablation) и 9 (валидация).
+Реализованы шаги 0–8 (Core-окно/скорер/факты/эффекты/BT/генератор, Shell-
+эффекторы+executor, конфиг/телеметрия/wiring, §7-обобщение звена 4 + ablation +
+fidelity аргумента). Остаётся шаг 9 (валидация: интеграционный прогон end-to-end
+на mock-MCP + синк доков).
 Синхронизирован с: `BUILD_ROADMAP.md` (спина S1–S8 + §1/§3),
 `BACKLOG.md` (секция «S8. Секвенирование актуаций»),
 `SPECS.md` (запланированные модули `core/actuation`/`host/executor`/
-`config/actuation` + порядок стадий), `VALIDATION.md` (§7.10 — планируемое
-расширение), `README.md` (навигация + статус), `adr/0012-actuation-sequencing.md`.
+`config/actuation` + порядок стадий), `VALIDATION.md` (§7.10 — сложная реакция,
+реализовано), `README.md` (навигация + статус), `adr/0012-actuation-sequencing.md`.
