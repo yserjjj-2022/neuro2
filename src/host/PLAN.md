@@ -47,3 +47,40 @@
 - **Инъекция meter**: fake для replay; реальный RSS нестабилен (ADR-0006).
 - **bus_dim 14**: resources добавляет 2 канала.
 - **Регресс-фингерпринт**: значимые смены valence (|v|>1), не микро-шум.
+
+## S8 этап 6: эффекторы + executor (Shell)
+
+### Файлы
+
+1. `src/host/effectors.py` — `Effector` Protocol, `DeferredEffector`,
+   `ToolEffector`, `SpeechEffector`
+2. `src/host/executor.py` — `ActuatorExecutor`, `ExecutorOutcome`, `node_at`
+3. `src/tests/test_actuation_executor.py` — эффекторы + executor
+
+### Порядок
+
+1. `Effector` Protocol (`goal`/`start`/`poll`/`preempt`) + `WorkFn`.
+2. `DeferredEffector`: синхронная работа, отложенная на `latency_ticks`
+   (не блокирует тик); `poll` → `Running` → результат (кэш) → `Preempted`.
+3. `ToolEffector` над `ProbeEffector` (через gate); `SpeechEffector` над
+   инъецированным `speak`. Отказ/сбой → `Failure`.
+4. `ActuatorExecutor`: опрос эффекторов → `action_status`; tick BT; разрешение
+   бегущего листа по `TickMemory.running_path`; преемпция (смена goal →
+   `preempt`); старт нового; `done` без переигрывания.
+5. `ExecutorOutcome`: статус, `running_goal`, `impatience`, `completed` (→ шина).
+6. Тесты: нет блокировки тика; завершение на след. тике; `preempt` → `Preempted`
+   → `Failure`; результат в `completed`; нетерпение растёт; `done`; детерминизм.
+
+### Зависимости
+
+`host.executor` ← `core.actuation`, `host.effectors`; `host.effectors` ←
+`host.probe` (ProbeEffector), `core.actuation` (Actuation/Result). Без цикла.
+
+### Заметки этапа 6
+
+- **FC/IS:** эффекторы/executor — Shell (I/O и время); BT/генератор — Core.
+- **Планировщик завершений** — детерминированный (`latency_ticks`), аналог
+  `DeterministicMeter`; реальные вызовы секундами — этап 7 (нетерпение в шину).
+- **Преемпция:** смена бегущего `goal` → `preempt` старого эффектора; прерванный
+  шаг **не** успешен (fail-safe).
+- **Wiring в loop/телеметрия** — этап 7, не здесь (этот этап самодостаточен).

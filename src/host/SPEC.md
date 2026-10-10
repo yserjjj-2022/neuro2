@@ -13,6 +13,8 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 - `gate.py` — `CapabilityGate` + tiers + `Capability`-флаги (единая точка
   side-effect, S4; гранулярные права — S4-долг).
 - `control.py` — `ControlChannel` (status/pause/resume/step, S4).
+- `effectors.py` — `Effector` Protocol + адаптеры (S8 этап 6).
+- `executor.py` — `ActuatorExecutor` (tick BT над эффекторами, S8 этап 6).
 - `loop.py` — `HostLoop`: время, precision, гомеостаз, throttle, attention,
   ресурсы, guard, drift, policy-контекст, телеметрия.
 
@@ -219,6 +221,95 @@ T4/`ACT_IRREVERSIBLE` (нужен HITL-токен). Неизвестный аф�
 
 `build_host_loop(config, meter=None)` — колонки под фактический `bus_dim`,
 гомеостат из `config.homeostasis`, `policy_config` из `config.policy`.
+
+## Effectors (effectors.py, S8 этап 6)
+
+Общий контракт эффектора — идиома ROS Action Server (ADR-0012 §7):
+`Running`/`Success`/`Failure`/`Preempted`. Речь и тул-вызов — два эффектора за
+одним контрактом; исполнение всегда идёт через `CapabilityGate` (fail-safe deny).
+
+```python
+class Effector(Protocol):
+    @property
+    def goal(self) -> str | None: ...          # что сейчас исполняется (None — простой)
+    def start(self, actuation: Actuation) -> None: ...
+    def poll(self) -> ActuationResult: ...
+    def preempt(self) -> None: ...
+
+WorkFn = Callable[[Actuation], ActuationResult]
+
+
+class DeferredEffector:
+    """База: синхронная работа, отложенная на ``latency_ticks`` (детерминизм)."""
+    def __init__(self, work: WorkFn, *, latency_ticks: int = 0) -> None: ...
+
+
+class ToolEffector(DeferredEffector):
+    def __init__(self, probe: ProbeEffector, *, latency_ticks: int = 0) -> None: ...
+
+
+class SpeechEffector(DeferredEffector):
+    def __init__(
+        self, speak: Callable[[Actuation], str | None], *, latency_ticks: int = 0
+    ) -> None: ...
+```
+
+- `start` — начать активацию; работа **не** выполняется здесь (не блокирует тик).
+- `poll` — текущий `ActuationResult`: `Running`, пока не истёк `latency_ticks`,
+  затем работа выполняется **один раз** и кэшируется.
+- `preempt` — прервать: статус → `Preempted`, активация сбрасывается.
+- `ToolEffector` зовёт `ProbeEffector.probe` (через gate); отказ/сбой → `Failure`.
+- `SpeechEffector` зовёт инъецированный `speak`; `None` → `Failure`.
+- Неизвестный вид/ошибка транспорта не роняют тик (эффектор возвращает `Failure`).
+
+## ActuatorExecutor (executor.py, S8 этап 6)
+
+Shell: ведёт BT-дерево во времени, не блокируя тик (ADR-0012 §7–8).
+
+```python
+@dataclass(frozen=True)
+class ExecutorOutcome:
+    status: NodeStatus
+    running_goal: str | None
+    impatience: float                 # 0..1 — сигнал нетерпения
+    completed: tuple[ActuationResult, ...]   # завершилось в этом тике → в шину
+
+
+class ActuatorExecutor:
+    def __init__(
+        self, *, effectors: Mapping[ActuationKind, Effector], expected_ticks: int = 1
+    ) -> None: ...
+    def tick(self, root: Node, facts: Mapping[str, float]) -> ExecutorOutcome: ...
+    @property
+    def done(self) -> bool: ...
+```
+
+Алгоритм тика:
+
+1. **Опросить** бегущие эффекторы → `action_status` (статус узла по `goal`);
+   завершившиеся добавить в `completed` и в **накопитель** статусов.
+2. **Tick BT** с `TickContext(facts, action_status)` (накопитель + бегущие).
+3. **Разрешить бегущий узел** по `TickMemory.running_path` (`node_at`); это
+   `Action`-лист → его `Actuation`.
+4. **Преемпция:** эффектор, исполняющий **другой** `goal`, получает `preempt`
+   (статус → `Preempted`, маппится в `Failure` дерева); освободившийся эффектор
+   может быть переиспользован.
+5. **Старт:** если бегущий `Action` ещё не запущен — `start` его эффектора
+   (по `Actuation.kind`). Нет эффектора под вид → `Failure` для `goal`.
+6. **Завершение:** корень вернул `Success`/`Failure` → `done`; повторные тики
+   возвращают тот же итог, дерево **не** переигрывается (иначе готовый
+   `Sequence` перезапустил бы пройденные листья).
+
+Инварианты этапа 6:
+
+- **Нет блокировки:** длинный шаг не держит тик; завершение приходит на
+  следующем тике (при `latency_ticks=0`).
+- **Преемпция через эффектор:** смена бегущего `goal` → `preempt` старого
+  (fail-safe: прерванный шаг не считается успешным).
+- **Ожидание — сигнал:** `impatience = clamp((elapsed − expected)/expected, 0, 1)`
+  (0 при `expected_ticks=0`); питает перерешение (этап 7 — в шину).
+- **Детерминизм:** при фиксированных `latency_ticks` прогон воспроизводим.
+- **Завершённость:** `done` после `Success`/`Failure`; дерево не переигрывается.
 
 ## CapabilityGate (gate.py, S4 + гранулярные права)
 
