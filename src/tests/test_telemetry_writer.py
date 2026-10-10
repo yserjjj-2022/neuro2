@@ -51,6 +51,11 @@ def _event(**overrides: object) -> TelemetryEvent:
         "consolidated_pruned": 0,
         "probe_affordance": "",
         "probe_success": False,
+        "actuation_status": "",
+        "actuation_goal": "",
+        "actuation_impatience": 0.0,
+        "actuation_steps": 0,
+        "actuation_preemptions": 0,
         "phase": "phase1",
         "mode": "free",
     }

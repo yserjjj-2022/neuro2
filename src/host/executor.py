@@ -42,12 +42,14 @@ class ExecutorOutcome:
         running_goal: Идентификатор бегущей активации (None — ничего не бежит).
         impatience: Сигнал нетерпения ∈ [0, 1] (elapsed против ожидания).
         completed: Завершившиеся в этом тике активации → в шину (ADR-0012 §7).
+        preemptions: Сколько бегущих шагов прервано в этом тике (fail-safe).
     """
 
     status: NodeStatus
     running_goal: str | None
     impatience: float
     completed: tuple[ActuationResult, ...]
+    preemptions: int = 0
 
 
 def node_at(root: Node, path: tuple[int, ...]) -> Node:
@@ -101,7 +103,7 @@ class ActuatorExecutor:
         """
         if expected_ticks < 0:
             raise ValueError(f"expected_ticks must be >= 0, got {expected_ticks}")
-        self.effectors: Mapping[ActuationKind, Effector] = dict(effectors)
+        self.effectors: dict[ActuationKind, Effector] = dict(effectors)
         self.expected_ticks = expected_ticks
         self._root: Node | None = None
         self._statuses: dict[str, NodeStatus] = {}
@@ -109,23 +111,31 @@ class ActuatorExecutor:
         self._final = NodeStatus.FAILURE
         self._target_goal: str | None = None
         self._elapsed = 0
+        self._preemptions = 0
 
     @property
     def done(self) -> bool:
         """Завершено ли дерево (``Success``/``Failure``)."""
         return self._done
 
-    def _reset(self, root: Node) -> None:
-        """Сбросить состояние при смене дерева (преемпция, fail-safe)."""
+    def _reset(self, root: Node) -> int:
+        """Сбросить состояние при смене дерева (преемпция, fail-safe).
+
+        Returns:
+            Сколько бегущих шагов прервано сбросом.
+        """
+        preemptions = 0
         for effector in self.effectors.values():
             if effector.goal is not None:
                 effector.preempt()
+                preemptions += 1
         self._root = root
         self._statuses = {}
         self._done = False
         self._final = NodeStatus.FAILURE
         self._target_goal = None
         self._elapsed = 0
+        return preemptions
 
     def _poll_effectors(self) -> list[ActuationResult]:
         """Опросить эффекторы; вернуть завершившиеся в этом тике (ADR-0012 §7)."""
@@ -140,11 +150,18 @@ class ActuatorExecutor:
                 completed.append(result)
         return completed
 
-    def _apply_preemption(self, target_goal: str | None) -> None:
-        """Прервать эффекторы, исполняющие не целевую активацию (fail-safe)."""
+    def _apply_preemption(self, target_goal: str | None) -> int:
+        """Прервать эффекторы, исполняющие не целевую активацию (fail-safe).
+
+        Returns:
+            Сколько бегущих шагов прервано.
+        """
+        preemptions = 0
         for effector in self.effectors.values():
             if effector.goal is not None and effector.goal != target_goal:
                 effector.preempt()
+                preemptions += 1
+        return preemptions
 
     def _impatience(self, target_goal: str | None) -> float:
         """Сигнал нетерпения: elapsed против ожидания (ADR-0012 §8)."""
@@ -185,16 +202,18 @@ class ActuatorExecutor:
         if status is not NodeStatus.RUNNING:
             self._done = True
             self._final = status
-            self._apply_preemption(None)
-            return ExecutorOutcome(status, None, 0.0, tuple(completed))
+            preemptions = self._apply_preemption(None)
+            return ExecutorOutcome(status, None, 0.0, tuple(completed), preemptions)
 
         running = node_at(root, memory.running_path)
         if running.kind is not NodeKind.ACTION or running.actuation is None:
             # Защита: бегущий узел должен быть Action-листом (валидация Node).
             self._done = True
             self._final = NodeStatus.FAILURE
-            self._apply_preemption(None)
-            return ExecutorOutcome(NodeStatus.FAILURE, None, 0.0, tuple(completed))
+            preemptions = self._apply_preemption(None)
+            return ExecutorOutcome(
+                NodeStatus.FAILURE, None, 0.0, tuple(completed), preemptions
+            )
 
         target: Actuation = running.actuation
         impatience = self._impatience(target.goal)
@@ -204,11 +223,15 @@ class ActuatorExecutor:
             self._statuses[target.goal] = NodeStatus.FAILURE
             self._done = True
             self._final = NodeStatus.FAILURE
-            self._apply_preemption(None)
-            return ExecutorOutcome(NodeStatus.FAILURE, None, 0.0, tuple(completed))
+            preemptions = self._apply_preemption(None)
+            return ExecutorOutcome(
+                NodeStatus.FAILURE, None, 0.0, tuple(completed), preemptions
+            )
 
-        self._apply_preemption(target.goal)
+        preemptions = self._apply_preemption(target.goal)
         if effector.goal != target.goal:
             effector.start(target)
 
-        return ExecutorOutcome(status, target.goal, impatience, tuple(completed))
+        return ExecutorOutcome(
+            status, target.goal, impatience, tuple(completed), preemptions
+        )

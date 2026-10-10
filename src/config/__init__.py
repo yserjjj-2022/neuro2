@@ -11,10 +11,12 @@ Re-exports:
     PolicyConfig — action selection parameters (S4)
     SocialConfig — theory-of-mind parameters (S5)
     AutonomyConfig — selfcontrol/consolidation/drive/factors parameters (S6)
+    ActuationConfig — actuation sequencing parameters (S8)
     load_preset / available_presets — named deterministic presets (S7)
 """
 
 from .params import (
+    ActuationConfig,
     AttractorConfig,
     AutonomyConfig,
     ColumnParams,
@@ -29,6 +31,7 @@ from .params import (
 from .presets import available_presets, load_preset
 
 __all__ = [
+    "ActuationConfig",
     "AttractorConfig",
     "AutonomyConfig",
     "ColumnParams",

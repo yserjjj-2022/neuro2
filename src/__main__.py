@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 from src.config import (
+    ActuationConfig,
     AutonomyConfig,
     HostConfig,
     MemoryConfig,
@@ -188,6 +189,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Отключить автономию (S6): контур S5 без selfcontrol.",
     )
     parser.add_argument(
+        "--actuation",
+        action="store_true",
+        help="Включить секвенирование актуаций (S8): BT + executor над "
+        "эффекторами. Дефолт off → S7-совместимость.",
+    )
+    parser.add_argument(
+        "--actuation-max-depth",
+        type=int,
+        default=3,
+        help="Горизонт генератора цепочек актуаций (S8). По умолчанию 3.",
+    )
+    parser.add_argument(
         "--consolidate",
         action="store_true",
         help="Выполнить явную консолидацию памяти (S6) и выйти.",
@@ -320,10 +333,7 @@ def _run_sensitivity(args: argparse.Namespace) -> int:
         values = ", ".join(f"{v:.4f}" for v in result.metric_values)
         verdict = "OK" if result.passed else "FAIL"
         ok = ok and result.passed
-        print(
-            f"[{verdict}] {case.knob} → {case.metric} "
-            f"({case.direction}): [{values}]"
-        )
+        print(f"[{verdict}] {case.knob} → {case.metric} ({case.direction}): [{values}]")
     print("sensitivity: all invariants hold" if ok else "sensitivity: FAILURES")
     return 0 if ok else 1
 
@@ -523,9 +533,7 @@ def _run_diagnose(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_chat(
-    loop: HostLoop, args: argparse.Namespace, social: SocialConfig
-) -> int:
+def _run_chat(loop: HostLoop, args: argparse.Namespace, social: SocialConfig) -> int:
     """Запустить диалоговый стенд (S3/S5).
 
     Args:
@@ -593,23 +601,31 @@ def _run_chat(
 
 
 def _build_config(
-    args: argparse.Namespace, social: SocialConfig, autonomy: AutonomyConfig
+    args: argparse.Namespace,
+    social: SocialConfig,
+    autonomy: AutonomyConfig,
+    actuation: ActuationConfig | None = None,
 ) -> HostConfig:
     """Собрать HostConfig из CLI-флагов или именованного пресета (S7-B).
 
     При ``--preset`` база берётся из пресета, а поверх применяются только
     операционные CLI-переопределения (dt/ticks/seed/log/db) и выключатели
-    (--no-policy/--no-social/--no-autonomy/--chat). Пресет фиксирует
-    детерминизм (synthetic, fake LLM/embedder) — он не переопределяется.
+    (--no-policy/--no-social/--no-autonomy/--chat/--actuation). Пресет
+    фиксирует детерминизм (synthetic, fake LLM/embedder) — он не
+    переопределяется.
 
     Args:
         args: Аргументы CLI.
         social: Социальный конфиг из CLI-флагов.
         autonomy: Конфиг автономии из CLI-флагов.
+        actuation: Конфиг секвенирования актуаций из CLI-флагов (S8);
+            None → дефолтный (disabled) для обратной совместимости.
 
     Returns:
         Готовый HostConfig.
     """
+    if actuation is None:
+        actuation = ActuationConfig()
     if args.preset is not None:
         config = load_preset(args.preset, override=args.preset_file)
         return replace(
@@ -631,6 +647,11 @@ def _build_config(
                 enabled=config.autonomy.enabled and not args.no_autonomy,
                 consolidate_every_ticks=args.night_every,
                 consolidate_min_episodes=args.night_min_episodes,
+            ),
+            actuation=replace(
+                config.actuation,
+                enabled=config.actuation.enabled or actuation.enabled,
+                max_depth=actuation.max_depth,
             ),
         )
     return HostConfig(
@@ -657,6 +678,7 @@ def _build_config(
         policy=PolicyConfig(enabled=not args.no_policy, mode=args.mode),
         social=social,
         autonomy=autonomy,
+        actuation=actuation,
     )
 
 
@@ -687,6 +709,9 @@ def main(argv: list[str] | None = None) -> int:
         consolidate_every_ticks=args.night_every,
         consolidate_min_episodes=args.night_min_episodes,
     )
+    actuation = ActuationConfig(
+        enabled=args.actuation, max_depth=args.actuation_max_depth
+    )
 
     # Реестр интеграций (ADR-0011): каталог + реальные MCP-клиенты. Без флага
     # поведение S6 идентично (default_affordances + mock-транспорт).
@@ -702,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:
             probe_affordances = probe_fn.affordances()
 
     loop: HostLoop = build_host_loop(
-        _build_config(args, social, autonomy),
+        _build_config(args, social, autonomy, actuation),
         integrations=integrations,
         probe_fn=probe_fn,
         affordances=probe_affordances,

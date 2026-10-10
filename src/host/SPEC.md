@@ -196,6 +196,10 @@ class HostLoop:
     def consolidate_memory(self) -> int: ...                         # S6
     def record_consolidation(self, pruned: int) -> None: ...         # S6
     def explore(self, *, reason="epistemic drive") -> ProbeResult | None: ...  # S6 п2
+    def tick_actuation(self, root: Node, facts=None) -> ExecutorOutcome | None: ...  # S8
+    def attach_speech(self, speak) -> None: ...                                 # S8
+    @property
+    def actuation_enabled(self) -> bool: ...                                    # S8
     @property
     def escape_hatch_active(self) -> bool: ...
 ```
@@ -204,6 +208,15 @@ class HostLoop:
 (карта аффордансов + gate). `explore()` — мягкий драйв: зондирует только при
 неопределённости выше `autonomy.explore_threshold` и наличии обратимого
 аффорданса; результат идёт в телеметрию следующего тика.
+
+`executor: ActuatorExecutor | None` (S8) — создаётся при
+`config.actuation.enabled` (дефолт False → контур S7 идентичен). Тул-эффектор
+подключается лишь при доступном `probe_effector` (иначе вызовы шли бы в обход
+гейта). `tick_actuation(root, facts)` ведёт выведенное дерево во времени
+(request `step_once` уже прошёл); при выключении — no-op. `attach_speech(speak)`
+подключает речевой эффектор, когда `SpeechController` создан (диалоговый
+стенд). Поля актуаций пишутся в телеметрию следующего `step_once`
+(`actuation_*`).
 
 ## ProbeEffector (probe.py, S6 проход 2)
 
@@ -643,7 +656,7 @@ class FidelityHarness:
 3. `time_scale` масштабирует субъективное время (1.0 = жизнь).
 4. Непрерывность: эмоциональный контур всегда включён (ADR-0006).
 5. Non-finite → HostIntegrityError (fail-fast).
-6. Телеметрия: 24 плоских поля (S4 + escape hatch).
+6. Телеметрия: 42 плоских поля (S4 + escape hatch + S8 актуации).
 7. **Рефлекс ≤ 1 тик:** критический сигнал → throttle в том же тике.
 8. **Обратимость:** throttle восстанавливает базовое `k` при `active=False`;
    escape hatch сбрасывается при нормализации сигнала.

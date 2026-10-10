@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from src.config import (
+    ActuationConfig,
     AttractorConfig,
     AutonomyConfig,
     ColumnParams,
@@ -263,3 +266,36 @@ class TestAutonomyConfig:
 
     def test_host_config_has_autonomy(self) -> None:
         assert HostConfig().autonomy.enabled is False
+
+
+class TestActuationConfig:
+    """ActuationConfig: дефолты и валидация (S8)."""
+
+    def test_defaults(self) -> None:
+        cfg = ActuationConfig()
+        assert cfg.enabled is False
+        assert cfg.max_depth == 3
+        assert cfg.expected_ticks == 1
+        assert cfg.latency_ticks == 0
+
+    def test_host_config_has_actuation(self) -> None:
+        assert HostConfig().actuation.enabled is False
+
+    def test_bad_max_depth_raises(self) -> None:
+        with pytest.raises(ValueError):
+            ActuationConfig(max_depth=0)
+
+    def test_negative_ticks_raise(self) -> None:
+        with pytest.raises(ValueError):
+            ActuationConfig(expected_ticks=-1)
+        with pytest.raises(ValueError):
+            ActuationConfig(latency_ticks=-1)
+
+    def test_preferences_defaults(self) -> None:
+        cfg = ActuationConfig()
+        assert cfg.preferences.pragmatic_weight == 1.0
+        assert cfg.preferences.epistemic_weight == 0.5
+
+    def test_frozen(self) -> None:
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            ActuationConfig().enabled = True  # type: ignore[misc]

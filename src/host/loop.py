@@ -21,18 +21,21 @@ gives deterministic, replay-friendly runs; ``"wall"`` measures real time.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
-from src.config import AutonomyConfig, HostConfig, PolicyConfig
+from src.config import ActuationConfig, AutonomyConfig, HostConfig, PolicyConfig
+from src.core.actuation import Actuation, ActuationKind, Node
 from src.core.cmc import apply_attention, attention_gate
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
 from src.core.homeostasis import HomeostasisState, Homeostat
 from src.core.policy import MacroContext, PartnerView, PolicyContext, PolicyTrace
 from src.core.selfcontrol import SelfMonitor
+from src.host.effectors import Effector, SpeechEffector, ToolEffector
+from src.host.executor import ActuatorExecutor, ExecutorOutcome
 from src.host.gate import (
     Capability,
     CapabilityGate,
@@ -109,6 +112,8 @@ class HostLoop:
     selfcontrol: SelfMonitor | None = None
     autonomy_config: AutonomyConfig | None = None
     probe_effector: ProbeEffector | None = None
+    actuation_config: ActuationConfig | None = None
+    executor: ActuatorExecutor | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
     _prev_f: float = field(default=0.0, init=False, repr=False)
@@ -148,6 +153,11 @@ class HostLoop:
     _current_tick: int = field(default=0, init=False, repr=False)
     _probe_affordance_pending: str = field(default="", init=False, repr=False)
     _probe_success_pending: bool = field(default=False, init=False, repr=False)
+    _actuation_status_pending: str = field(default="", init=False, repr=False)
+    _actuation_goal_pending: str = field(default="", init=False, repr=False)
+    _actuation_impatience_pending: float = field(default=0.0, init=False, repr=False)
+    _actuation_steps_pending: int = field(default=0, init=False, repr=False)
+    _actuation_preemptions_pending: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -450,6 +460,11 @@ class HostLoop:
             consolidated_pruned=self._consolidated_pruned_pending,
             probe_affordance=self._probe_affordance_pending,
             probe_success=self._probe_success_pending,
+            actuation_status=self._actuation_status_pending,
+            actuation_goal=self._actuation_goal_pending,
+            actuation_impatience=self._actuation_impatience_pending,
+            actuation_steps=self._actuation_steps_pending,
+            actuation_preemptions=self._actuation_preemptions_pending,
         )
         self._spoke_pending = False
         self._policy_action_pending = ""
@@ -457,6 +472,11 @@ class HostLoop:
         self._consolidated_pruned_pending = 0
         self._probe_affordance_pending = ""
         self._probe_success_pending = False
+        self._actuation_status_pending = ""
+        self._actuation_goal_pending = ""
+        self._actuation_impatience_pending = 0.0
+        self._actuation_steps_pending = 0
+        self._actuation_preemptions_pending = 0
         self.last_outcome = outcome
         self.last_drift = drift
         self.last_memory_hit = memory_hit
@@ -557,9 +577,7 @@ class HostLoop:
             mode=macro.mode,
             partner=partner,
             metacognition=(
-                self.selfcontrol.metacognition
-                if self.selfcontrol is not None
-                else None
+                self.selfcontrol.metacognition if self.selfcontrol is not None else None
             ),
         )
 
@@ -717,6 +735,78 @@ class HostLoop:
         self.last_policy_trace = trace
         self._policy_action_pending = trace.chosen.value
         self._policy_reason_pending = trace.reason
+
+    def tick_actuation(
+        self,
+        root: Node,
+        facts: Mapping[str, float] | None = None,
+    ) -> ExecutorOutcome | None:
+        """Провести тик секвенирования актуаций (S8 этап 7).
+
+        Вызывается Shell'ом (chat/behavioral) поверх ``step_once``: ведёт
+        выведенное дерево ``root`` во времени через эффекторы. Секвенирование
+        выключено (``executor is None``) → no-op, поля телеметрии пусты → контур
+        S7 идентичен. Завершённые активации возвращаются в ``outcome.completed``
+        (→ шина, ADR-0012 §7).
+
+        Args:
+            root: Корень текущего deliberative-дерева (из генератора, этап 5).
+            facts: Снимок фактов мира (для кондишенов); None → пусто.
+
+        Returns:
+            ExecutorOutcome текущего тика или None (секвенирование выключено).
+        """
+        if self.executor is None:
+            return None
+        outcome = self.executor.tick(root, dict(facts) if facts else {})
+        self._actuation_status_pending = outcome.status.value
+        self._actuation_goal_pending = outcome.running_goal or ""
+        self._actuation_impatience_pending = outcome.impatience
+        self._actuation_steps_pending = len(outcome.completed)
+        self._actuation_preemptions_pending = outcome.preemptions
+        return outcome
+
+    @property
+    def actuation_enabled(self) -> bool:
+        """Включено ли секвенирование актуаций (S8)."""
+        return self.executor is not None
+
+    @property
+    def last_actuation_goal(self) -> str:
+        """Бегущая активация последнего тика ("" — ничего не бежит) — S8."""
+        return self._actuation_goal_pending
+
+    @property
+    def last_actuation_telemetry(self) -> tuple[str, str, float, int, int]:
+        """Поля телеметрии актуаций последнего тика (S8).
+
+        Returns:
+            (status, goal, impatience, steps, preemptions).
+        """
+        return (
+            self._actuation_status_pending,
+            self._actuation_goal_pending,
+            self._actuation_impatience_pending,
+            self._actuation_steps_pending,
+            self._actuation_preemptions_pending,
+        )
+
+    def attach_speech(self, speak: Callable[[Actuation], str | None]) -> None:
+        """Подключить речевой эффектор к секвенированию (S8, Shell).
+
+        Речь доступна только в диалоговом стенде (``SpeechController`` создаётся
+        после loop), поэтому эффектор подключается отдельно. Секвенирование
+        выключено (``executor is None``) → no-op.
+
+        Args:
+            speak: Функция генерации речи (актуация → текст или None).
+        """
+        if self.executor is None:
+            return
+        latency = self.actuation_config.latency_ticks if self.actuation_config else 0
+        self.executor.effectors[ActuationKind.SPEAK] = SpeechEffector(
+            speak, latency_ticks=latency
+        )
 
     def run(self, max_ticks: int) -> int:
         """Прогнать цикл: до ``max_ticks`` тиков.
@@ -883,6 +973,23 @@ def build_host_loop(
             probe_fn=probe_fn,
         )
 
+    # Секвенирование актуаций (S8 этап 7): executor над эффекторами. Дефолт
+    # enabled=False → S7-совместимость (речь как была, без BT-контура). Тул-
+    # эффектор подключается лишь при доступном probe_effector (иначе гейта нет
+    # и вызовы молча «проходили» бы — так делать нельзя). Речевой эффектор
+    # подключается Shell'ом позже (`attach_speech`), когда есть SpeechController.
+    executor: ActuatorExecutor | None = None
+    if config.actuation.enabled:
+        effectors: dict[ActuationKind, Effector] = {}
+        if probe_effector is not None:
+            effectors[ActuationKind.INVOKE_TOOL] = ToolEffector(
+                probe_effector, latency_ticks=config.actuation.latency_ticks
+            )
+        executor = ActuatorExecutor(
+            effectors=effectors,
+            expected_ticks=config.actuation.expected_ticks,
+        )
+
     return HostLoop(
         bus=bus,
         pipeline=pipeline,
@@ -916,4 +1023,6 @@ def build_host_loop(
         selfcontrol=selfcontrol,
         autonomy_config=config.autonomy,
         probe_effector=probe_effector,
+        actuation_config=config.actuation,
+        executor=executor,
     )

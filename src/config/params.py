@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.core.actuation import ActuationPreferences
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
 from src.core.energy import FreeEnergyCalculator
@@ -382,9 +383,7 @@ class AutonomyConfig:
             ValueError: Если окна/пороги/скорости вне допустимых границ.
         """
         if self.metacog_window < 1:
-            raise ValueError(
-                f"metacog_window must be >= 1, got {self.metacog_window}"
-            )
+            raise ValueError(f"metacog_window must be >= 1, got {self.metacog_window}")
         if self.csd_variance_gain < 0.0 or self.csd_autocorr_gain < 0.0:
             raise ValueError(
                 f"csd gains must be >= 0, got "
@@ -407,9 +406,7 @@ class AutonomyConfig:
         if self.max_schemas < 0:
             raise ValueError(f"max_schemas must be >= 0, got {self.max_schemas}")
         if self.recency_tau_s <= 0.0:
-            raise ValueError(
-                f"recency_tau_s must be > 0, got {self.recency_tau_s}"
-            )
+            raise ValueError(f"recency_tau_s must be > 0, got {self.recency_tau_s}")
         if not 0.0 < self.factor_learning_rate <= 1.0:
             raise ValueError(
                 f"factor_learning_rate must be in (0, 1], "
@@ -425,6 +422,39 @@ class AutonomyConfig:
                 f"consolidate_min_episodes must be >= 0, "
                 f"got {self.consolidate_min_episodes}"
             )
+
+
+@dataclass(frozen=True)
+class ActuationConfig:
+    """Параметры секвенирования актуаций (S8).
+
+    Attributes:
+        enabled: Включать ли секвенирование (BT + executor). False → контур
+            S7 (речь как была): поведение идентично, телеметрия без активаций.
+        preferences: Веса скорера окна (ADR-0012 §10).
+        max_depth: Горизонт генератора (2–3; защита от chattering/агента).
+        expected_ticks: Ожидаемая длительность шага (для нетерпения).
+        latency_ticks: Задержка завершения эффектора (детерминизм).
+    """
+
+    enabled: bool = False
+    preferences: ActuationPreferences = field(default_factory=ActuationPreferences)
+    max_depth: int = 3
+    expected_ticks: int = 1
+    latency_ticks: int = 0
+
+    def __post_init__(self) -> None:
+        """Валидация: горизонт >= 1, неотрицательные тики.
+
+        Raises:
+            ValueError: Если max_depth < 1 или тики отрицательны.
+        """
+        if self.max_depth < 1:
+            raise ValueError(f"max_depth must be >= 1, got {self.max_depth}")
+        if self.expected_ticks < 0:
+            raise ValueError(f"expected_ticks must be >= 0, got {self.expected_ticks}")
+        if self.latency_ticks < 0:
+            raise ValueError(f"latency_ticks must be >= 0, got {self.latency_ticks}")
 
 
 @dataclass(frozen=True)
@@ -459,6 +489,7 @@ class HostConfig:
         policy: Параметры policy (S4).
         social: Параметры социального контура (S5).
         autonomy: Параметры автономии (S6).
+        actuation: Параметры секвенирования актуаций (S8).
     """
 
     dt: float = 0.1
@@ -493,6 +524,7 @@ class HostConfig:
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
     autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
+    actuation: ActuationConfig = field(default_factory=ActuationConfig)
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""

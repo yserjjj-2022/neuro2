@@ -51,6 +51,11 @@ def _event(**overrides: object) -> TelemetryEvent:
         "consolidated_pruned": 0,
         "probe_affordance": "",
         "probe_success": False,
+        "actuation_status": "",
+        "actuation_goal": "",
+        "actuation_impatience": 0.0,
+        "actuation_steps": 0,
+        "actuation_preemptions": 0,
         "phase": "phase1",
         "mode": "free",
     }
@@ -110,6 +115,11 @@ def test_serialize_all_s1_fields() -> None:
         "consolidated_pruned",
         "probe_affordance",
         "probe_success",
+        "actuation_status",
+        "actuation_goal",
+        "actuation_impatience",
+        "actuation_steps",
+        "actuation_preemptions",
         "phase",
         "mode",
     ):
@@ -170,3 +180,23 @@ def test_serialize_negative_stress() -> None:
     assert "-5.0" in result
     assert "phase2" in result
     assert "game" in result
+
+
+def test_serialize_actuation_fields() -> None:
+    """S8: поля актуаций сериализуются корректно."""
+    data = json.loads(
+        serialize_event(
+            _event(
+                actuation_status="running",
+                actuation_goal="tool:web_search",
+                actuation_impatience=0.5,
+                actuation_steps=2,
+                actuation_preemptions=1,
+            )
+        )
+    )
+    assert data["actuation_status"] == "running"
+    assert data["actuation_goal"] == "tool:web_search"
+    assert data["actuation_impatience"] == 0.5
+    assert data["actuation_steps"] == 2
+    assert data["actuation_preemptions"] == 1

@@ -16,10 +16,12 @@ claim_conflict) = 29.
 S6: +6 полей автономии (metacog_conflict/metastability/saturation, reset_level,
 change_kind, consolidated_pruned) = 35.
 S6 (проход 2): +2 поля MCP-зондирования (probe_affordance, probe_success) = 37.
+S8: +5 полей секвенирования актуаций (actuation_status/goal/impatience/steps/
+preemptions) = 42.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 37 полей)
+### TelemetryEvent (frozen dataclass, 42 полей)
 
 ```python
 @dataclass(frozen=True)
@@ -59,6 +61,11 @@ class TelemetryEvent:
     consolidated_pruned: int  # удалено эпизодов при консолидации (S6)
     probe_affordance: str  # имя выполненного MCP-зондирования, "" если нет (S6)
     probe_success: bool  # успешно ли зондирование (S6)
+    actuation_status: str  # статус BT-дерева, "" если выключено (S8)
+    actuation_goal: str  # бегущая активация, "" если ничего (S8)
+    actuation_impatience: float  # сигнал нетерпения [0, 1] (S8)
+    actuation_steps: int  # завершено шагов актуации на тике (S8)
+    actuation_preemptions: int  # преемпций на тике (S8)
     phase: str
     mode: str
 ```
@@ -121,6 +128,13 @@ def log(
     reset_level="",
     change_kind="",
     consolidated_pruned=0,
+    probe_affordance="",
+    probe_success=False,
+    actuation_status="",
+    actuation_goal="",
+    actuation_impatience=0.0,
+    actuation_steps=0,
+    actuation_preemptions=0,
 ) -> None: ...
 ```
 

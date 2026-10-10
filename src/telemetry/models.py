@@ -51,6 +51,11 @@ class TelemetryEvent:
         consolidated_pruned: Удалено эпизодов при консолидации — S6.
         probe_affordance: Имя выполненного MCP-зондирования ("" если нет) — S6.
         probe_success: Успешно ли зондирование (gate разрешил и транспорт ответил).
+        actuation_status: Статус BT-дерева ("" если выключено) — S8.
+        actuation_goal: Бегущая активация ("" если ничего не бежит) — S8.
+        actuation_impatience: Сигнал нетерпения [0, 1] — S8.
+        actuation_steps: Завершено шагов актуации на тике — S8.
+        actuation_preemptions: Преемпций (смен целей) на тике — S8.
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
     """
@@ -90,5 +95,10 @@ class TelemetryEvent:
     consolidated_pruned: int
     probe_affordance: str
     probe_success: bool
+    actuation_status: str
+    actuation_goal: str
+    actuation_impatience: float
+    actuation_steps: int
+    actuation_preemptions: int
     phase: str
     mode: str

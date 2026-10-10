@@ -94,6 +94,11 @@ class TelemetryLogger:
         consolidated_pruned: int = 0,
         probe_affordance: str = "",
         probe_success: bool = False,
+        actuation_status: str = "",
+        actuation_goal: str = "",
+        actuation_impatience: float = 0.0,
+        actuation_steps: int = 0,
+        actuation_preemptions: int = 0,
     ) -> None:
         """Записать событие в лог.
 
@@ -135,6 +140,11 @@ class TelemetryLogger:
             consolidated_pruned: Удалено эпизодов при консолидации (S6).
             probe_affordance: Выполненное MCP-зондирование ("" если нет) (S6).
             probe_success: Успешно ли зондирование (S6).
+            actuation_status: Статус BT-дерева ("" если выключено) (S8).
+            actuation_goal: Бегущая активация ("" если ничего не бежит) (S8).
+            actuation_impatience: Сигнал нетерпения [0, 1] (S8).
+            actuation_steps: Завершено шагов актуации на тике (S8).
+            actuation_preemptions: Преемпций на тике (S8).
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -172,6 +182,11 @@ class TelemetryLogger:
             consolidated_pruned=consolidated_pruned,
             probe_affordance=probe_affordance,
             probe_success=probe_success,
+            actuation_status=actuation_status,
+            actuation_goal=actuation_goal,
+            actuation_impatience=actuation_impatience,
+            actuation_steps=actuation_steps,
+            actuation_preemptions=actuation_preemptions,
             phase=self.phase,
             mode=self.mode,
         )

@@ -78,6 +78,7 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `policy` | PolicyConfig() | выбор действия (S4) |
 | `social` | SocialConfig() | ToM (S5) |
 | `autonomy` | AutonomyConfig() | автономия (S6) |
+| `actuation` | ActuationConfig() | секвенирование актуаций (S8) |
 
 ### SpeechConfig (S3)
 
@@ -141,6 +142,16 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `explore_threshold` | 0.6 | Порог неопределённости для EXPLORE |
 | `factor_learning_rate` | 0.3 | Скорость обновления факторов |
 
+### ActuationConfig (S8)
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | False | Включать секвенирование (BT + executor); False → S7-совместимость |
+| `preferences` | ActuationPreferences() | Веса скорера окна (ADR-0012 §10) |
+| `max_depth` | 3 | Горизонт генератора (2–3) |
+| `expected_ticks` | 1 | Ожидаемая длительность шага (нетерпение) |
+| `latency_ticks` | 0 | Задержка завершения эффектора (детерминизм) |
+
 ## Пресеты (S7-B)
 
 ```python
@@ -192,6 +203,8 @@ CLI: `--preset NAME [--preset-file PATH]`.
    `csd_warning_threshold`/`reset_soft_threshold`/`schema_threshold`/
    `explore_threshold`∉[0,1], `consolidate_min_weight<0`, `max_schemas<0`,
    `recency_tau_s<=0`, `factor_learning_rate`∉(0,1] → ValueError.
+   `ActuationConfig`: `max_depth<1`, `expected_ticks<0`, `latency_ticks<0`
+   → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
 
