@@ -24,6 +24,12 @@ is a free function — reactive (re-evaluated from the root every tick), with
 the pure Core through ``TickContext.action_status`` (injected by the Shell);
 ``tick`` never executes effectors.
 
+Stage 5 adds the **runtime generator**: ``backward_chain`` derives a ``Node``
+tree from a ``Goal`` by chaining option ``effect``/``guard`` (horizon 2–3). The
+tree is never hand-written — behavior is *derived*, not programmed; an
+unreachable goal or an exhausted horizon degrades to a failing ``Condition``,
+never a fabricated ``Action``.
+
 Functional Core / Imperative Shell (ADR-0004): identical inputs → identical
 ``OptionTrace``. The window order is the tie-break, so the whole run is a
 pure function of a memoized window snapshot.
@@ -34,8 +40,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from src.core.actuation.models import (
+    Actuation,
+    ActuationKind,
     ActuationPreferences,
     Fact,
+    Goal,
     Guard,
     Node,
     NodeKind,
@@ -369,3 +378,82 @@ def tick(node: Node, context: TickContext) -> tuple[NodeStatus, TickMemory]:
     if node.kind is NodeKind.SEQUENCE:
         return _tick_sequence(node, context)
     return _tick_fallback(node, context)
+
+
+def _goal_condition(goal: Goal) -> Node:
+    """Собрать Condition-узел на цель (безопасный отказ/успех, этап 5)."""
+    return Node(
+        NodeKind.CONDITION, name=goal.fact.name, guard=Guard(goal.fact, goal.value)
+    )
+
+
+def _action_for(option: Option) -> Node:
+    """Собрать Action-узел из опции (этап 5)."""
+    kind = (
+        ActuationKind.INVOKE_TOOL
+        if option.source is OptionSource.TOOL
+        else ActuationKind.SPEAK
+    )
+    return Node(
+        NodeKind.ACTION,
+        name=option.id,
+        actuation=Actuation(kind, option.id, option.id),
+    )
+
+
+def _find_option(goal: Goal, options: Sequence[Option]) -> Option | None:
+    """Первая по порядку окна опция, достигающая факта цели (тай-брейк)."""
+    for option in options:
+        if option.effect is not None and option.effect.fact.name == goal.fact.name:
+            return option
+    return None
+
+
+def backward_chain(
+    goal: Goal,
+    options: Sequence[Option],
+    state: Mapping[str, float],
+    *,
+    max_depth: int = 3,
+) -> Node:
+    """Вывести дерево от цели обратным выводом (чистая, этап 5).
+
+    Дерево **не пишется руками** — оно выводится по ``effect``/``guard`` опций
+    (ADR-0012 §6): если опция, достигающая факта цели, несёт ``guard``, его
+    факт становится подцелью, которая разрешается рекурсивно и **предваряет**
+    действие (``Sequence``). Уже истинная цель, недостижимость или исчерпание
+    горизонта дают ``Condition``-узел на цель — честный отказ, не фиктивное
+    действие.
+
+    Args:
+        goal: Цель-исход (факт + целевое значение).
+        options: Окно опций (порядок задаёт тай-брейк).
+        state: Снимок фактов мира (что уже истинно).
+        max_depth: Горизонт вложенности (>= 1), защита от chattering/цикла.
+
+    Returns:
+        Корень выведенного дерева.
+
+    Raises:
+        ValueError: Если ``max_depth < 1``.
+    """
+    if max_depth < 1:
+        raise ValueError(f"max_depth must be >= 1, got {max_depth}")
+
+    def derive(current: Goal, depth: int) -> Node:
+        if guard_holds(Guard(current.fact, current.value), state):
+            return _goal_condition(current)
+        option = _find_option(current, options)
+        if option is None or depth >= max_depth:
+            return _goal_condition(current)
+        effect = option.effect
+        if effect is None:  # недостижимо: _find_option гарантирует effect
+            return _goal_condition(current)
+        action = _action_for(option)
+        guard = option.guard
+        if guard is None:
+            return action
+        subtree = derive(Goal(guard.fact, guard.threshold), depth + 1)
+        return Node(NodeKind.SEQUENCE, name=option.id, children=(subtree, action))
+
+    return derive(goal, 0)

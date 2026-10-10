@@ -486,3 +486,28 @@ class TickMemory:
     """
 
     running_path: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class Goal:
+    """Цель-исход генератора: сделать факт истинным (этап 5).
+
+    Decision выбирает цель-исход; ``backward_chain`` разворачивает её в дерево
+    (ADR-0012 §6). Цель — это не действие, а желаемое состояние мира.
+
+    Attributes:
+        fact: Факт, который нужно сделать истинным.
+        value: Целевое значение факта ∈ [0, 1].
+    """
+
+    fact: Fact
+    value: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Валидация: value в [0, 1].
+
+        Raises:
+            ValueError: Если value вне [0, 1].
+        """
+        if not 0.0 <= self.value <= 1.0:
+            raise ValueError(f"goal value must be in [0, 1], got {self.value}")

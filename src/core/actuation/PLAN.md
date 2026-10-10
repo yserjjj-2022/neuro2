@@ -1,6 +1,6 @@
 # PLAN.md — src/core/actuation
 
-Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–4).
+Реализация `src/core/actuation/SPEC.md` (S8, этапы 1–5).
 
 ## Файлы
 
@@ -8,15 +8,16 @@
   `ActuationPreferences`, `OptionCandidate`, `OptionTrace`, `Fact`, `Guard`,
   `Regularity`, `Effect`, `ToolAnnotations`, `ActuationKind`, `ActuationStatus`,
   `Actuation`, `ActuationResult`, `NodeKind`, `NodeStatus`, `Node`, `TickContext`,
-  `TickMemory` (frozen, с валидацией)
+  `TickMemory`, `Goal` (frozen, с валидацией)
 - `compute.py` — `build_options`, `score_option`, `select_option`,
   `evaluate_fact`, `guard_holds`, `regularity_cost`, `classify_reversible`,
-  `order_children`, `tick` (Core, чистые)
+  `order_children`, `tick`, `backward_chain` (Core, чистые)
 - `facts.py` — реестр `FACTS` (единый источник имён) + `DEFAULT_FACT_VALUE`
 - `__init__.py` — re-export
 - `src/tests/test_actuation.py` (этап 1), `src/tests/test_actuation_facts.py`
   (этап 2), `src/tests/test_actuation_effects.py` (этап 3),
-  `src/tests/test_actuation_bt.py` (этап 4)
+  `src/tests/test_actuation_bt.py` (этап 4),
+  `src/tests/test_actuation_generator.py` (этап 5)
 
 ## Порядок
 
@@ -79,6 +80,19 @@
    `order_children`, детерминизм, валидация формы, тотальность.
 8. Re-export в `__init__.py` и `src/core/__init__.py`.
 
+### Этап 5 (следующий)
+
+1. `Goal` (frozen): `fact`, `value ∈ [0, 1]`; валидация.
+2. `backward_chain(goal, options, state, *, max_depth=3)` → `Node`:
+   - цель уже истинна → `Condition`-узел на цель;
+   - выбор опции по `effect.fact.name == goal.fact.name` (тай-брейк — окно);
+   - опция с `guard` → `Sequence(subtree(guard), action)`;
+   - нет опции / исчерпан `max_depth` → безопасный отказ (`Condition`);
+   - `max_depth < 1` → `ValueError`.
+3. Тесты: цепочка (2 шага), уже истинно, недостижимо, горизонт, детерминизм,
+   ablation «убрать effect → схлопывается», валидация.
+4. Re-export в `__init__.py` и `src/core/__init__.py`.
+
 ## Заметки
 
 - `build_options` принимает `Affordance` из `src.mcp.probe` — **не** копирует модель.
@@ -98,3 +112,7 @@
 - `tick` реактивен: с корня каждый тик; `TickMemory` хранит один `running_path`.
 - Исходы действий входят в Core через `TickContext.action_status` (инжектит Shell).
 - `FALLBACK` даёт преемпцию: более приоритетный ребёнок вытесняет бегущего.
+- **Этап 5:** дерево выводится `backward_chain` от цели, не пишется руками.
+- Недостижимость/горизонт → безопасный отказ (`Condition`), не фиктивный `Action`.
+- Опция с `guard` → подцель предваряет действие (`Sequence`); так возникает
+  двухшаговость. LLM не участвует (ADR-0007).

@@ -1,4 +1,4 @@
-"""Actuation sequencing core (S8 stages 1–4, ADR-0012).
+"""Actuation sequencing core (S8 stages 1–5, ADR-0012).
 
 Open option window + total scorer + deterministic choice (stage 1); facts and
 conditions "default + enrichment" — ``Fact``/``Guard``/``Regularity`` with
@@ -6,10 +6,12 @@ conditions "default + enrichment" — ``Fact``/``Guard``/``Regularity`` with
 irreversibility as a stance — ``Effect``/``Actuation``/``ActuationResult``/
 ``ToolAnnotations`` with ``classify_reversible`` (stage 3); reactive Behavior
 Tree — ``Node``/``NodeKind``/``NodeStatus`` with ``tick``/``order_children``
-(stage 4). Pure Functional Core (ADR-0004).
+(stage 4); runtime generator — ``Goal`` with ``backward_chain`` (stage 5).
+Pure Functional Core (ADR-0004).
 """
 
 from .compute import (
+    backward_chain,
     build_options,
     classify_reversible,
     evaluate_fact,
@@ -30,6 +32,7 @@ from .models import (
     ActuationStatus,
     Effect,
     Fact,
+    Goal,
     Guard,
     Node,
     NodeKind,
@@ -58,6 +61,7 @@ __all__ = [
     "ActuationStatus",
     "Effect",
     "Fact",
+    "Goal",
     "Guard",
     "Node",
     "NodeKind",
@@ -72,6 +76,7 @@ __all__ = [
     "TickContext",
     "TickMemory",
     "ToolAnnotations",
+    "backward_chain",
     "build_options",
     "classify_reversible",
     "evaluate_fact",
