@@ -21,6 +21,12 @@ name = "time"
 enabled = true
 tool_args = { get_current_time = { timezone = "Europe/Moscow" } }
 
+# Видовой приор важности канала (rank₀ > 0): wᵢ = rank/dim для сегмента.
+# Без явных rank веса выключены (legacy F = 0.5·Σγ·e²).
+[[integrations]]
+name = "battery"
+rank = 3.0
+
 # Включить community web-search (по умолчанию выключен):
 [[integrations]]
 name = "web-search"

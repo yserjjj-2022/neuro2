@@ -74,12 +74,24 @@ class TestDefaultIntegrations:
         names = [s.name for s in default_integrations()]
         assert names == [
             "circadian",
+            "battery",
+            "cpu",
+            "message",
             "resources",
             "everything",
             "time",
             "weather",
             "web-search",
         ]
+
+    def test_sensor_order_matches_bus(self) -> None:
+        """Порядок SENSOR = порядок укладки шины (совместимость отпечатков)."""
+        sensors = [
+            s.name
+            for s in default_integrations()
+            if s.kind is IntegrationKind.SENSOR
+        ]
+        assert sensors == ["circadian", "battery", "cpu", "message", "resources"]
 
     def test_official_first_community_disabled(self) -> None:
         reg = IntegrationRegistry(default_integrations())
@@ -90,4 +102,10 @@ class TestDefaultIntegrations:
     def test_local_sensors(self) -> None:
         reg = IntegrationRegistry(default_integrations())
         sensors = reg.by_kind(IntegrationKind.SENSOR)
-        assert {s.name for s in sensors} == {"circadian", "resources"}
+        assert {s.name for s in sensors} == {
+            "circadian",
+            "battery",
+            "cpu",
+            "message",
+            "resources",
+        }

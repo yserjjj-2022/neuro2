@@ -92,6 +92,11 @@ class IntegrationRegistry:
 def default_integrations() -> tuple[IntegrationSpec, ...]:
     """База ростера (ADR-0011 §8): official-first, community — выключен.
 
+    Порядок SENSOR-записей задаёт укладку каналов на шину ``u(t)`` и должен
+    совпадать с прежним ``default_providers()``:
+    ``circadian, battery, cpu, message, resources`` — иначе сдвинутся offset
+    сегментов и поедут отпечатки. TOOL-записи идут после SENSOR.
+
     Returns:
         Кортеж записей: локальные сенсоры, official MCP (everything/time/
         weather), community web-search (disabled).
@@ -102,6 +107,27 @@ def default_integrations() -> tuple[IntegrationSpec, ...]:
             kind=IntegrationKind.SENSOR,
             transport=LocalTransport("circadian"),
             category=SignalCategory.EXTEROCEPTIVE,
+            provenance=Provenance.LOCAL,
+        ),
+        IntegrationSpec(
+            name="battery",
+            kind=IntegrationKind.SENSOR,
+            transport=LocalTransport("battery"),
+            category=SignalCategory.INTEROCEPTIVE,
+            provenance=Provenance.LOCAL,
+        ),
+        IntegrationSpec(
+            name="cpu",
+            kind=IntegrationKind.SENSOR,
+            transport=LocalTransport("cpu"),
+            category=SignalCategory.INTEROCEPTIVE,
+            provenance=Provenance.LOCAL,
+        ),
+        IntegrationSpec(
+            name="message",
+            kind=IntegrationKind.SENSOR,
+            transport=LocalTransport("message"),
+            category=SignalCategory.COMMUNICATIVE,
             provenance=Provenance.LOCAL,
         ),
         IntegrationSpec(

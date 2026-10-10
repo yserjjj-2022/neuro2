@@ -19,6 +19,7 @@ Schema (``configs/integrations.toml``)::
     enabled = true
     tools = []
     tool_args = { get_current_time = { timezone = "UTC" } }  # аргументы тулов
+    rank = 3.0                   # видовой приор важности канала (> 0)
 
 A record matching an existing base name replaces it; a new name appends.
 """
@@ -59,18 +60,19 @@ _ALLOWED_KEYS = {
     "enabled",
     "tools",
     "tool_args",
+    "rank",
 }
 
 
-def _build_transport(raw: dict[str, Any], name: str) -> StdioTransport | HttpTransport | LocalTransport:
+def _build_transport(
+    raw: dict[str, Any], name: str
+) -> StdioTransport | HttpTransport | LocalTransport:
     """Собрать транспорт из TOML-полей (fail-fast)."""
     kind = raw.get("transport")
     if kind == "stdio":
         if "command" not in raw:
             raise ValueError(f"integration {name!r}: stdio requires 'command'")
-        env = tuple(
-            (str(k), str(v)) for k, v in dict(raw.get("env", {})).items()
-        )
+        env = tuple((str(k), str(v)) for k, v in dict(raw.get("env", {})).items())
         return StdioTransport(
             str(raw["command"]),
             tuple(str(a) for a in raw.get("args", ())),
@@ -140,11 +142,38 @@ def _spec_from_toml(
         reversible=bool(raw.get("reversible", base.reversible if base else True)),
         period=int(raw.get("period", base.period if base else 1)),
         enabled=bool(raw.get("enabled", base.enabled if base else True)),
-        tools=tuple(
-            str(t) for t in raw.get("tools", base.tools if base else ())
-        ),
+        tools=tuple(str(t) for t in raw.get("tools", base.tools if base else ())),
         tool_args=_tool_args_from_toml(raw, base),
+        rank=_rank_from_toml(raw, base),
     )
+
+
+def _rank_from_toml(raw: dict[str, Any], base: IntegrationSpec | None) -> float | None:
+    """Собрать ``rank₀`` из TOML (fail-fast по типу/знаку).
+
+    Формат: ``rank = 3.0`` (скаляр > 0). Отсутствует → наследуется из базы
+    (или None). Явный ``rank`` включает веса каналов (BACKLOG).
+
+    Args:
+        raw: TOML-запись.
+        base: Базовая запись для наследования (None → без наследования).
+
+    Returns:
+        Ранг канала (> 0) или None (не объявлен).
+
+    Raises:
+        TypeError: Если ``rank`` не число.
+        ValueError: Если ``rank`` <= 0.
+    """
+    if "rank" not in raw:
+        return base.rank if base is not None else None
+    value = raw["rank"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"'rank' must be a number, got {type(value).__name__}")
+    rank = float(value)
+    if rank <= 0.0:
+        raise ValueError(f"'rank' must be > 0, got {rank}")
+    return rank
 
 
 def _tool_args_from_toml(
@@ -176,9 +205,7 @@ def _tool_args_from_toml(
     for tool, args in table.items():
         if not isinstance(args, dict):
             raise TypeError(f"'tool_args.{tool}' must be a table")
-        result.append(
-            (str(tool), tuple((str(k), str(v)) for k, v in args.items()))
-        )
+        result.append((str(tool), tuple((str(k), str(v)) for k, v in args.items())))
     return tuple(result)
 
 

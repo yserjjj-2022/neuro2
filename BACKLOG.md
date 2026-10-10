@@ -268,13 +268,12 @@ B (мета-пластичность, само-модель) — горизон�
 > - `gain(ctx)` — контекстный гейн (тема/аттрактор/severity): «разговор о
 >   выживании забивает многое».
 >
-> **Хранение (ADR-0011 §1):** **сейчас** `rank₀` — временно в
-> `HostConfig.channel_ranks` (шина собирается из `default_providers`, а не из
-> реестра — см. запись «Переезд сборки шины на реестр» ниже). **Целевое:**
-> `rank₀` — в `IntegrationSpec` (декларация органа); `rank_emp`/`gain` —
-> отдельный Shell-владелец (по образцу `PrecisionEstimator`); per-component
-> вектор весов собирается из `SignalBus.segments`. Скаляр на канал (не вектор);
-> внутренняя структура → разбиение на под-каналы.
+> **Хранение (ADR-0011 §1):** `rank₀` — в `IntegrationSpec.rank` (декларация
+> органа; `float | None`, ключ — `tag` провайдера). `HostConfig.channel_ranks`
+> остаётся override на переходный период. `rank_emp`/`gain` — отдельный
+> Shell-владелец (по образцу `PrecisionEstimator`); per-component вектор весов
+> собирается из `SignalBus.segments`. Скаляр на канал (не вектор); внутренняя
+> структура → разбиение на под-каналы.
 >
 > **Наблюдаемость:** оператор при обучении должен видеть `rank₀/rank_emp/gain`,
 > итоговый `w`, вклад канала в F и γ рядом — чтобы «почему хост вздрогнул»
@@ -282,10 +281,10 @@ B (мета-пластичность, само-модель) — горизон�
 
 | ID | Заголовок | Контекст | Приоритет | Дата |
 |----|-----------|----------|-----------|------|
-| [S1+][sensors] Заявленный `rank₀` + нормировка `w/dim` + вывод в `--status` ✅ | Реализовано: `channel_importance` (`host/sources.py`), `HostConfig.channel_ranks`, `importance` в `compute/observe/tick`, `channel_contrib` в `TickOutcome`/`--status`/телеметрии. Без обучения, без ctx | Раздел выше | P1 | 2026-10-10 |
+| [S1+][sensors] Заявленный `rank₀` + нормировка `w/dim` + вывод в `--status` ✅ | Реализовано: `channel_importance` (`host/sources.py`), `rank₀` в `IntegrationSpec.rank` (+ override `HostConfig.channel_ranks`), `importance` в `compute/observe/tick`, `channel_contrib` в `TickOutcome`/`--status`/телеметрии. Без обучения, без ctx | Раздел выше | P1 | 2026-10-10 |
 | [S1+][sensors] Наблюдаемость весов: `rank₀` + вклад в F ✅ | Реализовано: `channel_contrib` (`tag:вклад`) в `--status` и `TelemetryEvent`. Остаётся: `rank_emp`/`gain`/γ рядом (после обучения) | TelemetryEvent; `--status` | P1 | 2026-10-10 |
-| [S1+][sensors] `sensor_mode` (`live`/`cold`/`onboarding`) | Mock-сенсоры (`battery`/`cpu`) только для пустой памяти/тестов/replay; `live` — только реальные провайдеры. Аналог `embedder_mode`/`llm_mode` | `src/config/params.py`; `default_providers` | P1 | 2026-10-10 |
-| [S1+][sensors] **Переезд сборки шины на реестр интеграций** | `build_host_loop` собирает `u(t)` из `default_providers()`, а не из `IntegrationRegistry`: `battery`/`cpu`/`message` вообще нет в `default_integrations`. **Ключевое для масштабирования:** без этого нельзя наращивать сенсорику и выбирать набор сенсоров на конкретный экземпляр киберперсоны. Требует: полный ростер в реестре, реализация `to_provider` для MCP-сенсоров, миграция `rank₀` из `HostConfig.channel_ranks` в `IntegrationSpec`. Связано с `[INT][sensor] MCP Resources → u(t)` | ADR-0011 §1/§6; `host/loop.py`; `integrations/` | P1 | 2026-10-10 |
+| [S1+][sensors] `sensor_mode` (`live`/`cold`/`onboarding`) | Mock-сенсоры (`battery`/`cpu`) только для пустой памяти/тестов/replay; `live` — только реальные провайдеры. Аналог `embedder_mode`/`llm_mode`. Набор SENSOR-записей реестра (`enabled`) — естественное место выбора | `src/config/params.py`; `integrations/factories.py` | P1 | 2026-10-10 |
+| [S1+][sensors] **Переезд сборки шины на реестр интеграций** ✅ | Реализовано: `build_host_loop` собирает `u(t)` из SENSOR-записей `IntegrationRegistry` (`build_providers` + `SensorContext` в `integrations/factories.py`); полный ростер `circadian/battery/cpu/message/resources`; `rank₀` переехал в `IntegrationSpec.rank` (`float \| None`, ключ — `tag` провайдера); `HostConfig.channel_ranks` — override; `integrations=None` → `default_integrations()` (шина идентична прежней), аффордансы — `default_affordances()`. Остаётся: `to_provider` для MCP-сенсоров (Resources→u(t), P2) | ADR-0011 §1/§6; `host/loop.py`; `integrations/` | P1 | 2026-10-11 |
 | [S1+][sensors] Важность на входе колонок (`attention_gate`) | Шаг 1 применяет `importance` только к F. Семантически важность должна влиять и на то, сколько канала доходит до колонок (сейчас `attention_gate` аттенюирует только по γ). Обдумать `u_eff = u · a(γ) · f(importance)` | `cmc/attention.py`; `host/loop.py` | P2 | 2026-10-10 |
 | [S1+][sensors] `ChannelWeights` Shell + сборка вектора из сегментов | Владелец обученного состояния (по образцу `PrecisionEstimator`); per-component из `SignalBus.segments` | `core/energy/precision.py`; `host/sources.py` | P2 | 2026-10-10 |
 | [S1+][sensors] `rank_emp`: обучение по связи с гомеостазом + ablation-аудит | Якорь — сетпоинты (Maslow), не F; rolling cross-correlation, авто-лаг; ночной ablation-аудит против оверфита | Раздел выше; night cycle | P2 | 2026-10-10 |

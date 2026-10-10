@@ -47,12 +47,18 @@ from src.host.sources import (
     BusSegment,
     SignalBus,
     channel_importance,
-    default_providers,
 )
 from src.host.text_source import TextMessageProvider
 from src.host.throttle import ThrottlePlan, plan_throttle
 from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
-from src.integrations import IntegrationRegistry, to_affordances
+from src.integrations import (
+    IntegrationRegistry,
+    SensorContext,
+    build_providers,
+    default_integrations,
+    enabled_sensors,
+    to_affordances,
+)
 from src.mcp.probe import (
     AffordanceMap,
     ProbeRequest,
@@ -874,8 +880,12 @@ def build_host_loop(
             запусками — см. ADR-0006, stages/S1_SPEC.md §5).
         messages: Скрипт коммуникативных сообщений ``(tick, text)`` для
             ``TextMessageProvider`` (S2; в S3 заменится живым вводом).
-        integrations: Реестр интеграций (ADR-0011). None → карта аффордансов
-            из ``default_affordances()`` (совместимость S6).
+        integrations: Реестр интеграций (ADR-0011) — единственный источник
+            состава шины: SENSOR-записи → провайдеры ``u(t)``. None → база
+            ``default_integrations()`` (порядок circadian/battery/cpu/message/
+            resources совпадает с прежним ``default_providers()``). Карта
+            аффордансов: None → ``default_affordances()`` (совместимость S6),
+            иначе из реестра.
         probe_fn: Реальный транспорт зондирования (ADR-0011). None → mock.
         affordances: Готовая карта аффордансов (приоритетнее реестра). None →
             из реестра, иначе ``default_affordances()``.
@@ -918,21 +928,39 @@ def build_host_loop(
         )
         message_provider = TextMessageProvider(embedder=embedder, messages=messages)
 
-    providers = default_providers(
-        message_dim=config.memory.embedding_dim,
+    # Реестр интеграций — единственный источник состава шины (ADR-0011 §6).
+    # None → база default_integrations() (порядок circadian/battery/cpu/
+    # message/resources идентичен прежнему default_providers()).
+    bus_registry = (
+        integrations
+        if integrations is not None
+        else IntegrationRegistry(default_integrations())
+    )
+    sensor_ctx = SensorContext(
         seed=config.seed,
+        message_dim=config.memory.embedding_dim,
         resource_provider=resource_provider,
         message_provider=message_provider,
     )
+    providers = build_providers(bus_registry.specs, sensor_ctx)
     bus = SignalBus(providers)
     prior_dim = config.memory.prior_dim if memory is not None else 0
     total_dim = bus.bus_dim + prior_dim
 
     # Важность каналов (BACKLOG): rank₀ → per-component wᵢ = rank/dim.
-    # Пусто → None (legacy: F = 0.5·Σγ·e², обратная совместимость S1–S8).
-    # Веса включаются только при явном объявлении рангов оператором.
+    # Ранги берутся из записей SENSOR (``IntegrationSpec.rank``) по tag
+    # провайдера; ``config.channel_ranks`` — override на переходный период.
+    # Пусто (никто не объявил ранг) → None: legacy F = 0.5·Σγ·e² (S1–S8).
+    ranks: dict[str, float] = {
+        provider.tag: spec.rank
+        for spec, provider in zip(
+            enabled_sensors(bus_registry.specs), providers, strict=True
+        )
+        if spec.rank is not None
+    }
+    ranks.update(config.channel_ranks)
     importance: np.ndarray | None = None
-    if config.channel_ranks:
+    if ranks:
         importance_segments = bus.segments
         if prior_dim > 0:
             importance_segments = importance_segments + (
@@ -940,7 +968,7 @@ def build_host_loop(
             )
         importance = channel_importance(
             importance_segments,
-            dict(config.channel_ranks),
+            ranks,
             total_dim=total_dim,
         )
 

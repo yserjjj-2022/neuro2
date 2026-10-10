@@ -180,3 +180,48 @@ class TestLoadIntegrations:
         assert spec is not None
         assert spec.kind is IntegrationKind.SENSOR
         assert spec.provenance is Provenance.LOCAL
+
+    def test_rank_override(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            """
+            [[integrations]]
+            name = "battery"
+            rank = 3.0
+            """,
+        )
+        reg = load_integrations(path)
+        battery = reg.find("battery")
+        assert battery is not None
+        assert battery.rank == pytest.approx(3.0)
+
+    def test_rank_absent_is_none(self, tmp_path: Path) -> None:
+        """Без rank важность не объявлена (legacy F = 0.5·Σγ·e²)."""
+        reg = load_integrations()
+        battery = reg.find("battery")
+        assert battery is not None
+        assert battery.rank is None
+
+    def test_rank_non_positive_fail_fast(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            """
+            [[integrations]]
+            name = "battery"
+            rank = 0.0
+            """,
+        )
+        with pytest.raises(ValueError):
+            load_integrations(path)
+
+    def test_rank_bad_type_fail_fast(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            """
+            [[integrations]]
+            name = "battery"
+            rank = "high"
+            """,
+        )
+        with pytest.raises(TypeError):
+            load_integrations(path)

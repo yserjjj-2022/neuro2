@@ -95,12 +95,17 @@ class Provenance(Enum):
 ### 6. Мост реестр → runtime
 
 ```python
-def to_provider(spec) -> SignalProvider: ...      # SENSOR
-def to_affordances(specs) -> AffordanceMap: ...   # TOOL
+def to_affordances(specs) -> AffordanceMap: ...       # TOOL (Core)
+def build_provider(spec, ctx) -> SignalProvider: ...  # SENSOR (Shell-glue)
+def build_providers(specs, ctx) -> list[SignalProvider]: ...
 ```
 
-Реестр — единственный источник, из которого собираются провайдеры шины и
-карта аффордансов. Mock (`_mock_probe`) заменяется реальным `probe_fn`.
+Реестр — единственный источник, из которого собираются **и провайдеры шины**
+`u(t)`, **и карта аффордансов**. Состав шины = порядок включённых SENSOR-записей;
+`rank₀` объявляется в записи (`IntegrationSpec.rank`). Тяжёлые зависимости
+(meter, эмбеддер) инжектятся готовыми через `SensorContext` (`factories.py`),
+поэтому чистый Core-мост (`bridges.py`) остаётся без I/O и без host/memory
+типов. Mock (`_mock_probe`) заменяется реальным `probe_fn`.
 
 ### 7. MCP-транспорт — клиент в `src/mcp/client.py`
 
@@ -118,8 +123,11 @@ Async↔sync мост — открытый риск (см. Open Questions).
 | 2 (реальный мир) | `weather-mcp` | stdio `npx` | official | экстероцепция без ключей (17 tools) |
 | 3 (позже, риск) | `web-search-mcp` | stdio `npx` | community | веб-поиск; скрейпинг + браузеры — не первый орган |
 
-Реальные локальные сенсоры (`datetime`, `psutil`) — как `LocalTransport`,
-до/параллельно с MCP.
+Реальные локальные сенсоры (`circadian`, `battery`, `cpu`, `message`,
+`resources`) — как `LocalTransport`, **первыми** в ростере: их порядок задаёт
+укладку каналов на шину `u(t)` (`circadian → battery → cpu → message →
+resources`) и совпадает с прежним `default_providers()`. `rank₀` каждого сенсора
+объявляется в его записи.
 
 ### 9. Гардрейлы сохраняются
 

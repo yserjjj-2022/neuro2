@@ -225,6 +225,98 @@ class TestChannelImportance:
         assert events[0]["channel_contrib"] != ""
         assert "battery:" in events[0]["channel_contrib"]
 
+    def test_rank_from_registry_enables_importance(self, tmp_path: Path) -> None:
+        """rank₀ из записи реестра включает веса (BACKLOG-целевое место)."""
+        from src.integrations import IntegrationRegistry
+        from src.integrations.models import (
+            IntegrationKind,
+            IntegrationSpec,
+            LocalTransport,
+            Provenance,
+        )
+
+        registry = IntegrationRegistry(
+            (
+                IntegrationSpec(
+                    name="battery",
+                    kind=IntegrationKind.SENSOR,
+                    transport=LocalTransport("battery"),
+                    provenance=Provenance.LOCAL,
+                    rank=3.0,
+                ),
+            )
+        )
+        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        loop = build_host_loop(config, integrations=registry)
+        loop.close()
+        assert loop.importance is not None
+        assert loop.importance.shape == (loop.total_dim,)
+        battery_seg = next(s for s in loop.bus.segments if s.name == "battery")
+        assert loop.importance[battery_seg.offset] == pytest.approx(3.0)
+
+    def test_registry_subset_narrows_bus(self, tmp_path: Path) -> None:
+        """Подмножество SENSOR в реестре → узкая шина (масштабируемость)."""
+        from src.integrations import IntegrationRegistry
+        from src.integrations.models import (
+            IntegrationKind,
+            IntegrationSpec,
+            LocalTransport,
+            Provenance,
+        )
+
+        registry = IntegrationRegistry(
+            (
+                IntegrationSpec(
+                    name="circadian",
+                    kind=IntegrationKind.SENSOR,
+                    transport=LocalTransport("circadian"),
+                    provenance=Provenance.LOCAL,
+                ),
+                IntegrationSpec(
+                    name="battery",
+                    kind=IntegrationKind.SENSOR,
+                    transport=LocalTransport("battery"),
+                    provenance=Provenance.LOCAL,
+                ),
+            )
+        )
+        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        loop = build_host_loop(config, integrations=registry)
+        loop.close()
+        assert [s.name for s in loop.bus.segments] == ["circadian", "battery"]
+        assert loop.bus.bus_dim == 3  # 2 (circadian) + 1 (battery)
+
+    def test_channel_ranks_override_wins(self, tmp_path: Path) -> None:
+        """HostConfig.channel_ranks — override поверх ранга реестра."""
+        from src.integrations import IntegrationRegistry
+        from src.integrations.models import (
+            IntegrationKind,
+            IntegrationSpec,
+            LocalTransport,
+            Provenance,
+        )
+
+        registry = IntegrationRegistry(
+            (
+                IntegrationSpec(
+                    name="battery",
+                    kind=IntegrationKind.SENSOR,
+                    transport=LocalTransport("battery"),
+                    provenance=Provenance.LOCAL,
+                    rank=2.0,
+                ),
+            )
+        )
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            channel_ranks=(("battery", 5.0),),
+        )
+        loop = build_host_loop(config, integrations=registry)
+        loop.close()
+        battery_seg = next(s for s in loop.bus.segments if s.name == "battery")
+        assert loop.importance is not None
+        assert loop.importance[battery_seg.offset] == pytest.approx(5.0)
+
 
 class TestHostLoopMechanics:
     """Механика loop: precision, время, валидация, graceful shutdown."""

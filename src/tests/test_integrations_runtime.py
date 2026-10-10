@@ -12,6 +12,7 @@ from src.host.loop import build_host_loop
 from src.integrations.models import (
     IntegrationKind,
     IntegrationSpec,
+    LocalTransport,
     Provenance,
     StdioTransport,
 )
@@ -66,6 +67,17 @@ def _routes(
     return cast("dict[str, tuple[MCPClient, str, dict[str, str]]]", items)
 
 
+def _sensor_spec() -> IntegrationSpec:
+    """Минимальный локальный SENSOR — чтобы шина собралась из реестра."""
+    return IntegrationSpec(
+        name="battery",
+        kind=IntegrationKind.SENSOR,
+        transport=LocalTransport("battery"),
+        category=SignalCategory.INTEROCEPTIVE,
+        provenance=Provenance.LOCAL,
+    )
+
+
 class TestProbeTransport:
     def test_call_returns_vector(self) -> None:
         transport = ProbeTransport(_routes({"echo": (_FakeClient("hi"), "echo", {})}))
@@ -112,6 +124,7 @@ class TestLoopWiring:
     def test_affordances_from_registry(self, tmp_path: Path) -> None:
         registry = IntegrationRegistry(
             (
+                _sensor_spec(),
                 IntegrationSpec(
                     name="weather",
                     kind=IntegrationKind.TOOL,
@@ -142,6 +155,7 @@ class TestLoopWiring:
     def test_probe_fn_used(self, tmp_path: Path) -> None:
         registry = IntegrationRegistry(
             (
+                _sensor_spec(),
                 IntegrationSpec(
                     name="w",
                     kind=IntegrationKind.TOOL,

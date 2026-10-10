@@ -15,30 +15,40 @@ runtime-артефактов (провайдеры шины, карта аффо
 ## Состав
 
 - `models.py` — `IntegrationKind`, `Provenance`, транспорты, `IntegrationSpec`
+  (`rank₀`)
 - `registry.py` — `IntegrationRegistry`, `default_integrations()`
 - `toml_loader.py` — `load_integrations` (Python-база + TOML-override)
-- `bridges.py` — `to_provider` (SENSOR), `to_affordances` (TOOL) — Core
+- `bridges.py` — `to_affordances` (TOOL) — Core, чистый
+- `factories.py` — `SensorContext`, `build_provider(s)` (SENSOR → провайдеры
+  шины) — Shell-glue
 - `runtime.py` — `ProbeTransport`, `connect_probe_transport` — Shell (MCP-клиенты)
 
 MCP-транспорт: `src/mcp/client.py` (`MCPClient.list_tools`/`call_tool`,
 sync-обёртка над async SDK).
 
-## Использование
+## Сборка шины
+
+`build_host_loop` собирает `u(t)` из **SENSOR-записей реестра** (порядок
+записей = порядок укладки каналов). `rank₀` в записи (`IntegrationSpec.rank`)
+включает веса каналов (`wᵢ = rank/dim`); без рангов — legacy `F = 0.5·Σγ·e²`.
+Набор сенсоров на экземпляр киберперсоны задаётся составом реестра.
 
 ```bash
 uv run python -m src --integrations configs/integrations.toml --ticks 5
 ```
 
-Без флага контур S6 идентичен (mock-транспорт + `default_affordances()`).
+Без флага: шина из `default_integrations()` (идентична прежней), карта
+аффордансов — `default_affordances()` (контур S6).
 
-## Ростер (порядок подключения)
+## Ростер
 
-| Приоритет | Сервер | Транспорт | Provenance |
+| Вид | Запись | Транспорт | Provenance |
 |---|---|---|---|
-| 1 | `server-everything` | stdio `npx` | official |
-| 1 | `mcp-server-time` | stdio `uvx` | official |
-| 2 | `weather-mcp` | stdio `npx` | official |
-| 3 | `web-search-mcp` | stdio `npx` | community |
+| SENSOR | `circadian`, `battery`, `cpu`, `message`, `resources` | local | local |
+| TOOL | `server-everything` | stdio `npx` | official |
+| TOOL | `mcp-server-time` | stdio `uvx` | official |
+| TOOL | `weather-mcp` | stdio `npx` | official |
+| TOOL | `web-search-mcp` | stdio `npx` | community (off) |
 
 Документы: [SPEC](SPEC.md), [PLAN](PLAN.md); решения — ADR-0011.
 Статус: **реализовано** (реестр, TOML-override, мосты, MCP-клиент stdio,

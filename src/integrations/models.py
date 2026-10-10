@@ -116,6 +116,10 @@ class IntegrationSpec:
         enabled: Включена ли интеграция.
         tools: Ожидаемые имена тулов (пусто → из tools/list).
         tool_args: Аргументы тулов по умолчанию (для тулов, требующих вход).
+        rank: Видовой приор важности канала (``rank₀``, BACKLOG). Скаляр > 0
+            применяется к сегменту провайдера как ``rank/dim``. None →
+            важность не объявлена (legacy: F = 0.5·Σγ·e²). Ключ сопоставления
+            — ``tag`` провайдера (см. ``factories.build_providers``).
     """
 
     name: str
@@ -128,6 +132,7 @@ class IntegrationSpec:
     enabled: bool = True
     tools: tuple[str, ...] = ()
     tool_args: ToolArgs = ()
+    rank: float | None = None
 
     def args_for(self, tool: str) -> dict[str, str]:
         """Аргументы вызова тула по умолчанию (пусто, если не заданы)."""
@@ -148,6 +153,10 @@ class IntegrationSpec:
         if self.period < 1:
             raise ValueError(
                 f"integration period must be >= 1, got {self.period}"
+            )
+        if self.rank is not None and self.rank <= 0.0:
+            raise ValueError(
+                f"integration rank must be > 0, got {self.rank}"
             )
         if isinstance(self.transport, LocalTransport) and (
             self.kind is not IntegrationKind.SENSOR

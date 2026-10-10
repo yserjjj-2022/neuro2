@@ -1,64 +1,24 @@
 """Bridges from the catalog to runtime artifacts (ADR-0011 §6, Core).
 
 The registry is the single source of truth; runtime views are derived:
-- ``to_provider`` — SENSOR → ``SignalProvider`` (bus u(t));
 - ``to_affordances`` — TOOL → ``AffordanceMap`` (epistemic probing).
 
-Pure functions: no I/O, deterministic. MCP sensors need a client-backed
-provider and are not built here yet (raise ``NotImplementedError``).
+SENSOR → ``SignalProvider`` assembly moved to ``factories.py`` (Shell-glue):
+it needs injected dependencies (meter, embedder) and must not drag host/memory
+types into this pure Core module.
+
+Pure functions: no I/O, deterministic.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.host.sources import (
-    CircadianProvider,
-    SignalProvider,
-)
 from src.integrations.models import (
     IntegrationKind,
     IntegrationSpec,
-    LocalTransport,
 )
 from src.mcp.probe import Affordance, AffordanceMap
-
-# Встроенные провайдеры по имени (LocalTransport.provider → фабрика).
-# ResourceProvider требует meter (инъекция) → строится отдельно в wiring.
-_LOCAL_BUILTINS: dict[str, type[SignalProvider]] = {
-    "circadian": CircadianProvider,
-}
-
-
-def to_provider(spec: IntegrationSpec) -> SignalProvider:
-    """Построить сенсорный провайдер из записи каталога (Core).
-
-    Args:
-        spec: Запись интеграции вида SENSOR.
-
-    Returns:
-        SignalProvider для укладки на шину u(t).
-
-    Raises:
-        ValueError: Если spec не SENSOR.
-        NotImplementedError: Для MCP-сенсоров (нужен клиент) или неизвестного
-            локального провайдера.
-    """
-    if spec.kind is not IntegrationKind.SENSOR:
-        raise ValueError(
-            f"to_provider expects SENSOR, got {spec.kind.value!r} ({spec.name})"
-        )
-    if isinstance(spec.transport, LocalTransport):
-        factory = _LOCAL_BUILTINS.get(spec.transport.provider)
-        if factory is None:
-            raise NotImplementedError(
-                f"local provider {spec.transport.provider!r} not buildable here "
-                f"(inject via wiring): {spec.name}"
-            )
-        return factory()
-    raise NotImplementedError(
-        f"MCP sensor provider not implemented yet: {spec.name}"
-    )
 
 
 def to_affordances(specs: Sequence[IntegrationSpec]) -> AffordanceMap:
@@ -97,4 +57,4 @@ def to_affordances(specs: Sequence[IntegrationSpec]) -> AffordanceMap:
     return AffordanceMap(tuple(affordances))
 
 
-__all__ = ["to_affordances", "to_provider"]
+__all__ = ["to_affordances"]
