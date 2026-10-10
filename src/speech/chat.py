@@ -177,6 +177,9 @@ class ChatSession:
                     task=task,
                     recall_hit=self.loop.last_memory_hit,
                     drift=self.loop.last_drift,
+                    channel_contrib=(
+                        outcome.channel_contrib if outcome is not None else ()
+                    ),
                 )
             )
 

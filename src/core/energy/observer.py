@@ -33,6 +33,7 @@ class EnergyObserver:
         prediction_error: np.ndarray,
         precision: np.ndarray,
         dt: float,
+        importance: np.ndarray | None = None,
     ) -> FreeEnergyResult:
         """Наблюдать за состоянием: считать метрики, записать через sink.
 
@@ -40,11 +41,15 @@ class EnergyObserver:
             prediction_error: Вектор ошибки предсказания e(t).
             precision: Вектор точности γ.
             dt: Шаг интегрирования в секундах (> 0).
+            importance: Веса важности каналов wᵢ (по компонентам). None →
+                единицы (обратная совместимость).
 
         Returns:
             FreeEnergyResult — сырые метрики без принятия решений.
         """
-        result = self.calculator.compute(prediction_error, precision, self._state, dt)
+        result = self.calculator.compute(
+            prediction_error, precision, self._state, dt, importance
+        )
         self._state = EnergyState(
             f=result.f,
             stress=result.allostatic_stress,

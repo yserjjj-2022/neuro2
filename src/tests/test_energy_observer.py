@@ -35,6 +35,18 @@ def test_observer_with_sink(observer: EnergyObserver) -> None:
     assert isinstance(log[0], FreeEnergyResult)
 
 
+def test_observer_passes_importance(observer: EnergyObserver) -> None:
+    """observe() прокидывает importance в калькулятор (взвешенный F)."""
+    error = np.array([1.0, 1.0])
+    precision = np.array([1.0, 1.0])
+
+    result = observer.observe(
+        error, precision, dt=0.01, importance=np.array([2.0, 2.0])
+    )
+
+    assert result.f == pytest.approx(2.0)  # 0.5 * (2 + 2)
+
+
 def test_observer_maintains_state(observer: EnergyObserver) -> None:
     """Два последовательных observe() корректно передают состояние."""
     error1 = np.array([1.0])

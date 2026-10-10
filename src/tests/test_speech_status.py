@@ -37,3 +37,10 @@ class TestFormatStatus:
 
     def test_deterministic(self) -> None:
         assert self._fmt() == self._fmt()
+
+    def test_no_contrib_omits_section(self) -> None:
+        assert "вклад" not in self._fmt()
+
+    def test_channel_contrib_rendered(self) -> None:
+        line = self._fmt(channel_contrib=(("battery", 0.42), ("message", 0.08)))
+        assert "| вклад: battery=0.42 message=0.08" in line

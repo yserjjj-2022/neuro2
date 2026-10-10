@@ -168,6 +168,64 @@ class TestHostLoopExperiment:
         assert events[19]["tick"] == 19
 
 
+class TestChannelImportance:
+    """Веса каналов (BACKLOG): rank₀ → per-component w, вклад в F."""
+
+    def test_no_ranks_disables_importance(self, tmp_path: Path) -> None:
+        """Без channel_ranks importance=None (legacy F = 0.5·Σγ·e²)."""
+        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        loop = build_host_loop(config)
+        loop.close()
+        assert loop.importance is None
+
+    def test_ranks_produce_weight_vector(self, tmp_path: Path) -> None:
+        """С channel_ranks importance = rank/dim по компонентам."""
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            channel_ranks=(("battery", 3.0),),
+        )
+        loop = build_host_loop(config)
+        loop.close()
+        assert loop.importance is not None
+        assert loop.importance.shape == (loop.total_dim,)
+        # battery dim=1 → вес 3.0; прочие каналы rank=1 → 1/dim
+        battery_seg = next(s for s in loop.bus.segments if s.name == "battery")
+        assert loop.importance[battery_seg.offset] == pytest.approx(3.0)
+
+    def test_rank_scales_channel_contribution(self, tmp_path: Path) -> None:
+        """rank повышает вклад канала в F и виден в channel_contrib."""
+        base = HostConfig(log_path=str(tmp_path / "a.jsonl"))
+        loop_base = build_host_loop(base)
+        for tick in range(20):
+            outcome_base = loop_base.step_once(tick)
+        loop_base.close()
+
+        boosted = HostConfig(
+            log_path=str(tmp_path / "b.jsonl"),
+            channel_ranks=(("battery", 5.0),),
+        )
+        loop_boost = build_host_loop(boosted)
+        for tick in range(20):
+            outcome_boost = loop_boost.step_once(tick)
+        loop_boost.close()
+
+        contrib_base = dict(outcome_base.channel_contrib)
+        contrib_boost = dict(outcome_boost.channel_contrib)
+        assert "battery" in contrib_base
+        assert contrib_boost["battery"] > contrib_base["battery"]
+
+    def test_channel_contrib_logged(self, tmp_path: Path) -> None:
+        """channel_contrib попадает в телеметрию (наблюдаемость весов)."""
+        config = HostConfig(log_path=str(tmp_path / "run.jsonl"))
+        loop = build_host_loop(config)
+        loop.run(5)
+        loop.close()
+
+        events = _read_events(tmp_path)
+        assert events[0]["channel_contrib"] != ""
+        assert "battery:" in events[0]["channel_contrib"]
+
+
 class TestHostLoopMechanics:
     """Механика loop: precision, время, валидация, graceful shutdown."""
 

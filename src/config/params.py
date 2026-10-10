@@ -490,6 +490,9 @@ class HostConfig:
         social: Параметры социального контура (S5).
         autonomy: Параметры автономии (S6).
         actuation: Параметры секвенирования актуаций (S8).
+        channel_ranks: Важность каналов шины (``rank₀``, tag → вес > 0).
+            Пусто → все каналы равноважны (1.0). Временное место до переезда
+            сборки шины на реестр интеграций (BACKLOG).
     """
 
     dt: float = 0.1
@@ -525,6 +528,7 @@ class HostConfig:
     social: SocialConfig = field(default_factory=SocialConfig)
     autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
     actuation: ActuationConfig = field(default_factory=ActuationConfig)
+    channel_ranks: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         """Валидация: положительные размеры, известные режимы."""
@@ -559,3 +563,14 @@ class HostConfig:
             raise ValueError(
                 f"k={self.k} exceeds number of columns {len(self.columns)}"
             )
+        seen_tags: set[str] = set()
+        for tag, rank in self.channel_ranks:
+            if not tag:
+                raise ValueError("channel_ranks tag must not be empty")
+            if tag in seen_tags:
+                raise ValueError(f"duplicate channel_ranks tag: {tag!r}")
+            seen_tags.add(tag)
+            if rank <= 0.0:
+                raise ValueError(
+                    f"channel_ranks rank must be > 0 for {tag!r}, got {rank}"
+                )

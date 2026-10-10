@@ -45,6 +45,7 @@ class FreeEnergyCalculator:
         precision: np.ndarray,
         state: EnergyState,
         dt: float,
+        importance: np.ndarray | None = None,
     ) -> FreeEnergyResult:
         """Рассчитать F(t), valence, stress, gamma.
 
@@ -55,16 +56,20 @@ class FreeEnergyCalculator:
             precision: Вектор точности γ для каждого канала.
             state: Предыдущее состояние аффективного контура.
             dt: Шаг интегрирования в секундах (> 0).
+            importance: Веса важности каналов wᵢ (по компонентам), shape как
+                prediction_error. None → единицы (обратная совместимость:
+                F(t) = 0.5·Σγᵢeᵢ²). Ненулевой вектор чинит скрытый вес
+                размерности (см. BACKLOG «Честная обработка сигналов»).
 
         Returns:
             FreeEnergyResult с полями: f, valence, allostatic_stress, gamma.
 
         Raises:
-            ValueError: Если prediction_error.shape != precision.shape
-                или dt <= 0.
+            ValueError: Если prediction_error.shape != precision.shape (или
+                importance), или dt <= 0.
 
         Formula:
-            F(t) = 0.5 · Σᵢ γᵢ · e(t)ᵢ²
+            F(t) = 0.5 · Σᵢ γᵢ · wᵢ · e(t)ᵢ²
             valence_raw = -(F(t) - state.f) / dt
             a = 1 - exp(-dt / valence_tau)
             valence = (1 - a)·state.valence + a·valence_raw
@@ -86,6 +91,11 @@ class FreeEnergyCalculator:
                 f"Shape mismatch: prediction_error {prediction_error.shape} "
                 f"!= precision {precision.shape}"
             )
+        if importance is not None and importance.shape != prediction_error.shape:
+            raise ValueError(
+                f"Shape mismatch: importance {importance.shape} "
+                f"!= prediction_error {prediction_error.shape}"
+            )
 
         # 3. Handle empty arrays (if shape check passed, both are empty)
         if prediction_error.size == 0:
@@ -104,8 +114,12 @@ class FreeEnergyCalculator:
             logger.debug("precision clipped")
             precision = np.clip(precision, 1e-6, None)
 
-        # 5. Compute F(t)
-        f = float(0.5 * np.sum(precision * prediction_error**2))
+        # 5. Compute F(t) — с весами важности, если заданы
+        error_sq = prediction_error**2
+        if importance is None:
+            f = float(0.5 * np.sum(precision * error_sq))
+        else:
+            f = float(0.5 * np.sum(precision * importance * error_sq))
 
         # 6. Valence: raw derivative, exponentially smoothed over time
         valence_raw = -(f - state.f) / dt

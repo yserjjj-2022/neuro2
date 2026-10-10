@@ -82,8 +82,14 @@ critical slowing down, протокол сброса), консолидация 
 скорер, единый контракт эффектора (речь/tool), Behavior Tree-исполнитель,
 runtime-генератор backward chaining, дефолт off (`ActuationConfig`); валидация —
 VALIDATION §7.10 (инварианты звеньев 4–5, ablation, fidelity, сквозной прогон
-через `HostLoop.tick_actuation`). 1266 тестов.
+через `HostLoop.tick_actuation`). 1290 тестов.
 Мок-сенсорика (`src/host/sources.py`), параметры (`src/config/`), CLI.
+
+**Веса каналов (честная обработка сигналов, BACKLOG):** важность канала
+`rank₀` (`HostConfig.channel_ranks`) разворачивается в per-component веса
+`wᵢ = rank/dim` (`channel_importance`), поэтому ширина канала больше не даёт
+скрытый вес: `F = 0.5·Σγ·w·e²`. Пусто → `importance=None` (legacy). Вклад
+каналов виден в `--status` и телеметрии (`channel_contrib`).
 
 Именование аффордансов: `Option.id` — неймспейс окна (`tool:<name>`),
 `Option.target` — реальное имя вызова (уходит в `Actuation.payload`); окно из

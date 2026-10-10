@@ -19,6 +19,7 @@ from src.host.sources import (
     SignalBus,
     StepProvider,
     UserMessageProvider,
+    channel_importance,
     default_providers,
 )
 from src.mcp import SignalCategory
@@ -262,3 +263,53 @@ class TestSignalBus:
     def test_segments_are_bus_segment(self) -> None:
         bus = SignalBus(default_providers())
         assert all(isinstance(s, BusSegment) for s in bus.segments)
+
+
+class TestChannelImportance:
+    """Развёртка важности каналов в per-component веса (BACKLOG)."""
+
+    def _segments(self) -> tuple[BusSegment, ...]:
+        return (
+            BusSegment(name="a", offset=0, dim=1, period=1),
+            BusSegment(name="b", offset=1, dim=4, period=1),
+        )
+
+    def test_default_rank_is_one_per_channel(self) -> None:
+        """Без рангов вес канала = 1/dim (равная важность, нет скрытого веса)."""
+        w = channel_importance(self._segments(), {})
+        assert w[0] == pytest.approx(1.0)  # канал a, dim=1
+        np.testing.assert_allclose(w[1:], 1.0 / 4.0)  # канал b, dim=4
+
+    def test_rank_distributed_over_dim(self) -> None:
+        """Вес канала rank/dim по компонентам: ширина не даёт скрытый вес."""
+        w = channel_importance(self._segments(), {"a": 2.0, "b": 8.0})
+        assert w[0] == pytest.approx(2.0)  # 2/1
+        np.testing.assert_allclose(w[1:], 2.0)  # 8/4
+
+    def test_missing_tag_uses_default(self) -> None:
+        w = channel_importance(self._segments(), {"a": 3.0}, default_rank=0.5)
+        assert w[0] == pytest.approx(3.0)
+        np.testing.assert_allclose(w[1:], 0.5 / 4.0)
+
+    def test_channel_contribution_independent_of_dim(self) -> None:
+        """Одинаковая ошибка на компоненту → равный суммарный вклад каналов."""
+        w = channel_importance(self._segments(), {"a": 1.0, "b": 1.0})
+        errors = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
+        contrib_a = float(np.sum((errors**2 * w)[0:1]))
+        contrib_b = float(np.sum((errors**2 * w)[1:5]))
+        assert contrib_a == pytest.approx(contrib_b)
+
+    def test_total_dim_explicit(self) -> None:
+        w = channel_importance(self._segments(), {}, total_dim=7)
+        assert w.shape == (7,)
+        np.testing.assert_array_equal(w[5:], np.ones(2))  # непокрытый хвост
+
+    def test_nonpositive_rank_raises(self) -> None:
+        with pytest.raises(ValueError):
+            channel_importance(self._segments(), {"a": 0.0})
+        with pytest.raises(ValueError):
+            channel_importance(self._segments(), {}, default_rank=0.0)
+
+    def test_segment_exceeds_total_dim_raises(self) -> None:
+        with pytest.raises(ValueError):
+            channel_importance(self._segments(), {}, total_dim=2)

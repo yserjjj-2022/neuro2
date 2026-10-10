@@ -56,6 +56,7 @@ def _event(**overrides: object) -> TelemetryEvent:
         "actuation_impatience": 0.0,
         "actuation_steps": 0,
         "actuation_preemptions": 0,
+        "channel_contrib": "",
         "phase": "phase1",
         "mode": "free",
     }
@@ -120,6 +121,7 @@ def test_serialize_all_s1_fields() -> None:
         "actuation_impatience",
         "actuation_steps",
         "actuation_preemptions",
+        "channel_contrib",
         "phase",
         "mode",
     ):

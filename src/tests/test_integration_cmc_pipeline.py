@@ -86,3 +86,37 @@ def test_pipeline_active_tags(pipeline: CMCPipeline) -> None:
     outcome = pipeline.tick(u, np.ones(6), dt=0.01, segments=segments)
     # Первый тик: ошибка по обоим каналам > порога
     assert outcome.active_tags == ("a", "b")
+
+
+def test_pipeline_channel_contrib(pipeline: CMCPipeline) -> None:
+    """channel_contrib отражает вклад каналов и реагирует на importance."""
+    from src.host.sources import BusSegment
+
+    segments = (
+        BusSegment(name="a", offset=0, dim=1, period=1),
+        BusSegment(name="b", offset=1, dim=1, period=1),
+    )
+    u = np.array([1.0, 2.0])
+    outcome = pipeline.tick(u, np.ones(6), dt=0.01, segments=segments)
+
+    tags = [tag for tag, _ in outcome.channel_contrib]
+    assert tags == ["a", "b"]
+    assert all(value >= 0.0 for _, value in outcome.channel_contrib)
+
+    # Канал b (вход 2.0) даёт больший вклад, чем a (вход 1.0)
+    contrib = dict(outcome.channel_contrib)
+    assert contrib["b"] > contrib["a"]
+
+    # importance усиливает вклад: удвоение веса a поднимает его вклад
+    weighted = pipeline.tick(
+        u, np.ones(6), dt=0.01, segments=segments, importance=np.array([8.0, 1.0])
+    )
+    assert dict(weighted.channel_contrib)["a"] > contrib["a"]
+
+
+def test_pipeline_channel_contrib_empty_without_segments(
+    pipeline: CMCPipeline,
+) -> None:
+    """Без карты сегментов channel_contrib пуст."""
+    outcome = pipeline.tick(np.array([1.0, 2.0]), np.ones(6), dt=0.01)
+    assert outcome.channel_contrib == ()

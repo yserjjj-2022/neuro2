@@ -75,6 +75,21 @@ def test_logger_with_mock_writer(
     assert isinstance(event.timestamp, float)
 
 
+def test_logger_channel_contrib(
+    logger: TelemetryLogger, mock_writer: MockWriter
+) -> None:
+    """channel_contrib прокидывается в событие (наблюдаемость весов)."""
+    logger.log(
+        free_energy=1.0,
+        valence=0.0,
+        allostatic_stress=0.0,
+        channel_contrib="battery:0.4200,message:0.0800",
+    )
+
+    event = mock_writer.events[0]
+    assert event.channel_contrib == "battery:0.4200,message:0.0800"
+
+
 def test_logger_swallows_writer_errors(
     logger: TelemetryLogger,
     mock_writer: MockWriter,

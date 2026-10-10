@@ -35,6 +35,8 @@ class TickOutcome:
         reflex_tags: Теги критических сигналов текущего тика.
         activities: Активности колонок (‖e‖²) — вход selfcontrol (S6).
         switched: Сменился ли аттрактор на этом тике (S6).
+        channel_contrib: Вклад каналов шины в F (tag, Σ wᵢeᵢ² по срезу) —
+            наблюдаемость важности (BACKLOG). Пусто без сегментов.
     """
 
     result: FreeEnergyResult
@@ -42,6 +44,7 @@ class TickOutcome:
     reflex_tags: tuple[str, ...]
     activities: Vector | None = None
     switched: bool = False
+    channel_contrib: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,7 @@ class CMCPipeline:
         dt: float,
         segments: tuple[BusSegment, ...] = (),
         reflex_tags: tuple[str, ...] = (),
+        importance: Vector | None = None,
     ) -> TickOutcome:
         """Один полный тик: CMC → voting/attractors → energy.
 
@@ -79,6 +83,8 @@ class CMCPipeline:
             dt: Шаг интегрирования в секундах (> 0).
             segments: Карта сегментов шины для active_tags.
             reflex_tags: Теги критических сигналов текущего тика.
+            importance: Веса важности каналов (по компонентам), shape ==
+                (input_dim,). None → единицы (обратная совместимость).
 
         Returns:
             TickOutcome — метрики и теги текущего тика.
@@ -104,18 +110,30 @@ class CMCPipeline:
         switched = _attractor_switched(prev_mask, self.attractor.current_mask)
 
         active_tags: tuple[str, ...] = ()
+        channel_contrib: tuple[tuple[str, float], ...] = ()
         if segments:
             active_tags = tuple(
                 _segment_tags_above(out.errors, segments, self.active_threshold)
             )
+            channel_contrib = _channel_contrib(out.errors, segments, importance)
 
-        result = self.observer.observe(np.ravel(out.errors), precision, dt)
+        # importance задан по компонентам шины (input_dim); ошибки raveled
+        # (N_columns * input_dim) → тилируем по колонкам, как γ.
+        importance_flat = (
+            None
+            if importance is None
+            else np.tile(importance, self.ensemble.n_columns)
+        )
+        result = self.observer.observe(
+            np.ravel(out.errors), precision, dt, importance_flat
+        )
         return TickOutcome(
             result=result,
             active_tags=active_tags,
             reflex_tags=reflex_tags,
             activities=activities,
             switched=switched,
+            channel_contrib=channel_contrib,
         )
 
 
@@ -156,6 +174,33 @@ def _segment_tags_above(
         if float(np.sum(window)) > threshold:
             tags.append(segment.name)
     return tags
+
+
+def _channel_contrib(
+    errors: Vector,
+    segments: tuple[BusSegment, ...],
+    importance: Vector | None,
+) -> tuple[tuple[str, float], ...]:
+    """Вклад каналов в F: Σ (wᵢ·eᵢ²) по срезу сегмента, усреднённый по колонкам.
+
+    Наблюдаемость важности (BACKLOG): показывает, какой канал реально «давит»
+    на аффективный контур. Без ``importance`` — равные веса (Σ eᵢ²).
+
+    Args:
+        errors: Ошибки колонок, shape=(n_columns, bus_dim).
+        segments: Карта сегментов шины.
+        importance: Веса важности (bus_dim,) или None.
+
+    Returns:
+        Кортеж ``(tag, вклад)`` в порядке сегментов.
+    """
+    weighted_sq = errors**2 if importance is None else errors**2 * importance
+    per_channel = np.sum(weighted_sq, axis=0)
+    contrib: list[tuple[str, float]] = []
+    for segment in segments:
+        window = per_channel[segment.offset : segment.offset + segment.dim]
+        contrib.append((segment.name, float(np.sum(window))))
+    return tuple(contrib)
 
 
 def build_energy_pipeline(log_path: Path) -> EnergyObserver:

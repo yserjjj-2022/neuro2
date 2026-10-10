@@ -18,7 +18,7 @@ valence, настоящая γ (обратная дисперсия). Решен
 ## Формулы (S1)
 
 ```
-F(t)         = 0.5 · Σᵢ γᵢ·e(t)ᵢ²                    (пусто → 0.0)
+F(t)         = 0.5 · Σᵢ γᵢ·wᵢ·e(t)ᵢ²                 (пусто → 0.0; wᵢ=1 без весов)
 valence_raw  = -(F(t) - state.f) / dt
 a            = 1 - exp(-dt / valence_tau)
 valence      = (1 - a)·state.valence + a·valence_raw   # EMA по времени
@@ -30,7 +30,12 @@ gamma        = mean(precision)  (пусто → gamma_base)
 - `dt` — шаг интегрирования в секундах (> 0), передаётся явно;
 - `valence_tau` (τ) — постоянная времени сглаживания valence, с;
 - `stress_leak_per_sec` (λ) — скорость утечки стресса, 1/с;
-- `γ` — precision (доверие каналу), из `PrecisionEstimator` или baseline.
+- `γ` — precision (доверие каналу), из `PrecisionEstimator` или baseline;
+- `wᵢ` — важность компоненты канала (`importance`, опционально). None → 1.
+  Честная обработка сигналов (BACKLOG): без весов ширина канала становится
+  скрытым весом (256-мерный эмбеддинг давит 1-мерный battery). Вес канала
+  `rank/dim` разворачивается в `wᵢ` (`host.sources.channel_importance`),
+  поэтому суммарный вклад канала в F не зависит от его размерности.
 
 Все временные величины — в секундах (единая база, ADR-0006).
 
@@ -74,10 +79,11 @@ class FreeEnergyCalculator:
         precision: np.ndarray,
         state: EnergyState,
         dt: float,
+        importance: np.ndarray | None = None,
     ) -> FreeEnergyResult: ...
 ```
 
-Raises: `ValueError` при `shape mismatch` или `dt <= 0`.
+Raises: `ValueError` при `shape mismatch` (в т.ч. `importance`) или `dt <= 0`.
 
 ### EnergyObserver (Shell)
 
@@ -89,7 +95,9 @@ class EnergyObserver:
         sink: Callable[[FreeEnergyResult], None] | None = None,
     ) -> None: ...
 
-    def observe(self, prediction_error, precision, dt) -> FreeEnergyResult: ...
+    def observe(
+        self, prediction_error, precision, dt, importance=None
+    ) -> FreeEnergyResult: ...
 
     @property
     def state(self) -> EnergyState: ...

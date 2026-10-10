@@ -99,6 +99,7 @@ class TelemetryLogger:
         actuation_impatience: float = 0.0,
         actuation_steps: int = 0,
         actuation_preemptions: int = 0,
+        channel_contrib: str = "",
     ) -> None:
         """Записать событие в лог.
 
@@ -145,6 +146,7 @@ class TelemetryLogger:
             actuation_impatience: Сигнал нетерпения [0, 1] (S8).
             actuation_steps: Завершено шагов актуации на тике (S8).
             actuation_preemptions: Преемпций на тике (S8).
+            channel_contrib: CSV-вклады каналов шины в F (tag:вклад) — BACKLOG.
         """
         event = TelemetryEvent(
             timestamp=time.time(),
@@ -187,6 +189,7 @@ class TelemetryLogger:
             actuation_impatience=actuation_impatience,
             actuation_steps=actuation_steps,
             actuation_preemptions=actuation_preemptions,
+            channel_contrib=channel_contrib,
             phase=self.phase,
             mode=self.mode,
         )

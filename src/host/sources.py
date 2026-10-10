@@ -18,6 +18,7 @@ Design notes:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -470,6 +471,66 @@ class BusSegment:
     offset: int
     dim: int
     period: int
+
+
+DEFAULT_CHANNEL_RANK = 1.0
+
+
+def channel_importance(
+    segments: Sequence[BusSegment],
+    ranks: Mapping[str, float],
+    *,
+    total_dim: int | None = None,
+    default_rank: float = DEFAULT_CHANNEL_RANK,
+) -> Vector:
+    """Развернуть важность каналов в per-component веса ``wᵢ``.
+
+    Честная обработка сигналов (BACKLOG): важность канала ``rank`` — свойство
+    органа (скаляр), а его ширина ``dim`` — скрытый вес. Поэтому вес канала
+    распределяется по его компонентам как ``rank / dim``: суммарный вклад
+    канала в F не зависит от его размерности.
+
+    Чистая функция: не мутирует входы.
+
+    Args:
+        segments: Карта сегментов шины (name/offset/dim/period).
+        ranks: Важность каналов по тегу (``rank₀``). Отсутствующий тег →
+            ``default_rank``. Значение должно быть > 0.
+        total_dim: Полная ширина вектора. None → по последнему сегменту.
+        default_rank: Важность канала без явного ранга (> 0).
+
+    Returns:
+        Вектор важности shape=(total_dim,) с ``rank/dim`` по срезам сегментов.
+
+    Raises:
+        ValueError: Если default_rank <= 0, ранг <= 0, dim <= 0 или
+            ``total_dim`` меньше покрытия сегментов.
+    """
+    if default_rank <= 0.0:
+        raise ValueError(f"default_rank must be > 0, got {default_rank}")
+    for name, rank in ranks.items():
+        if rank <= 0.0:
+            raise ValueError(f"rank must be > 0 for {name!r}, got {rank}")
+
+    if total_dim is None:
+        total_dim = max((s.offset + s.dim for s in segments), default=0)
+    if total_dim < 0:
+        raise ValueError(f"total_dim must be >= 0, got {total_dim}")
+
+    weights = np.ones(total_dim, dtype=np.float64)
+    for segment in segments:
+        if segment.dim <= 0:
+            raise ValueError(
+                f"segment {segment.name!r} has dim <= 0: {segment.dim}"
+            )
+        if segment.offset + segment.dim > total_dim:
+            raise ValueError(
+                f"segment {segment.name!r} exceeds total_dim {total_dim}: "
+                f"{segment.offset + segment.dim}"
+            )
+        rank = float(ranks.get(segment.name, default_rank))
+        weights[segment.offset : segment.offset + segment.dim] = rank / segment.dim
+    return weights
 
 
 class SignalBus:

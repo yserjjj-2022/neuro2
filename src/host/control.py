@@ -55,6 +55,7 @@ class ControlChannel:
             task=self.loop.active_task(),
             recall_hit=self.loop.last_memory_hit,
             drift=self.loop.last_drift,
+            channel_contrib=outcome.channel_contrib if outcome is not None else (),
         )
 
     def pause(self) -> None:

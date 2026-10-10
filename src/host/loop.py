@@ -43,7 +43,12 @@ from src.host.gate import (
 )
 from src.host.probe import ProbeEffector, ProbeFn
 from src.host.resources import ResourceMeter, ResourceProvider
-from src.host.sources import BusSegment, SignalBus, default_providers
+from src.host.sources import (
+    BusSegment,
+    SignalBus,
+    channel_importance,
+    default_providers,
+)
 from src.host.text_source import TextMessageProvider
 from src.host.throttle import ThrottlePlan, plan_throttle
 from src.host.wiring import CMCPipeline, TickOutcome, build_cmc_pipeline
@@ -83,6 +88,8 @@ class HostLoop:
         time_scale: Множитель субъективного времени.
         memory: Роутер памяти (S2); None → контур без памяти (S1).
         message_provider: Коммуникативный вход (S2); None → нет текста.
+        importance: Веса важности каналов шины (по компонентам, с учётом
+            приора памяти). None → единицы (обратная совместимость).
         clock: Источник wall-clock (инъекция для тестов).
     """
 
@@ -114,6 +121,7 @@ class HostLoop:
     probe_effector: ProbeEffector | None = None
     actuation_config: ActuationConfig | None = None
     executor: ActuatorExecutor | None = None
+    importance: np.ndarray | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
     _prev_f: float = field(default=0.0, init=False, repr=False)
@@ -371,7 +379,9 @@ class HostLoop:
                 ),
             )
         reflex_tags = tuple(s.tag for s in self.bus.last_signals if s.is_reflex)
-        outcome = self.pipeline.tick(u_eff, gamma, dt, segments, reflex_tags)
+        outcome = self.pipeline.tick(
+            u_eff, gamma, dt, segments, reflex_tags, self.importance
+        )
         check_finite(outcome.result)
         drift = self.drift.update(outcome.result)
         self.meter.record_tick(time.perf_counter() - compute_start)
@@ -465,6 +475,9 @@ class HostLoop:
             actuation_impatience=self._actuation_impatience_pending,
             actuation_steps=self._actuation_steps_pending,
             actuation_preemptions=self._actuation_preemptions_pending,
+            channel_contrib=",".join(
+                f"{tag}:{value:.4f}" for tag, value in outcome.channel_contrib
+            ),
         )
         self._spoke_pending = False
         self._policy_action_pending = ""
@@ -915,6 +928,22 @@ def build_host_loop(
     prior_dim = config.memory.prior_dim if memory is not None else 0
     total_dim = bus.bus_dim + prior_dim
 
+    # Важность каналов (BACKLOG): rank₀ → per-component wᵢ = rank/dim.
+    # Пусто → None (legacy: F = 0.5·Σγ·e², обратная совместимость S1–S8).
+    # Веса включаются только при явном объявлении рангов оператором.
+    importance: np.ndarray | None = None
+    if config.channel_ranks:
+        importance_segments = bus.segments
+        if prior_dim > 0:
+            importance_segments = importance_segments + (
+                BusSegment(name="memory", offset=bus.bus_dim, dim=prior_dim, period=1),
+            )
+        importance = channel_importance(
+            importance_segments,
+            dict(config.channel_ranks),
+            total_dim=total_dim,
+        )
+
     columns = [
         params.build(input_dim=total_dim, state_dim=total_dim)
         for params in config.columns
@@ -1020,6 +1049,7 @@ def build_host_loop(
         memory=memory,
         message_provider=message_provider,
         recall_enabled=config.memory.recall_enabled,
+        importance=importance,
         selfcontrol=selfcontrol,
         autonomy_config=config.autonomy,
         probe_effector=probe_effector,

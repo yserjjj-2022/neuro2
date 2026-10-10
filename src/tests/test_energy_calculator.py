@@ -79,6 +79,41 @@ def test_compute_precision_clip(calc: FreeEnergyCalculator) -> None:
     assert result.gamma > 0
 
 
+def test_compute_importance_weights(calc: FreeEnergyCalculator) -> None:
+    """importance масштабирует вклад компонент: F = 0.5·Σγ·w·e²."""
+    error = np.array([1.0, 1.0])
+    precision = np.array([1.0, 1.0])
+    importance = np.array([2.0, 0.5])
+
+    result = calc.compute(error, precision, EnergyState(), dt=0.01, importance=importance)
+
+    assert result.f == pytest.approx(0.5 * (2.0 + 0.5))  # 1.25
+
+
+def test_compute_importance_none_is_ones(calc: FreeEnergyCalculator) -> None:
+    """None → эквивалент единичных весов (обратная совместимость)."""
+    error = np.array([1.0, 2.0])
+    precision = np.array([1.0, 1.0])
+
+    without = calc.compute(error, precision, EnergyState(), dt=0.01)
+    ones = calc.compute(
+        error, precision, EnergyState(), dt=0.01, importance=np.ones(2)
+    )
+
+    assert without.f == pytest.approx(ones.f)
+
+
+def test_compute_importance_shape_mismatch(calc: FreeEnergyCalculator) -> None:
+    """ValueError при несовпадении формы importance."""
+    error = np.array([1.0, 2.0])
+    precision = np.array([1.0, 1.0])
+
+    with pytest.raises(ValueError):
+        calc.compute(
+            error, precision, EnergyState(), dt=0.01, importance=np.ones(3)
+        )
+
+
 def test_valence_sign(calc: FreeEnergyCalculator) -> None:
     """Проверка знака valence при росте F(t)."""
     result1 = calc.compute(np.array([1.0]), np.array([1.0]), EnergyState(), dt=0.01)

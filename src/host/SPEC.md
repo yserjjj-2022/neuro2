@@ -37,7 +37,8 @@ if text != last_text:
 u       = concat(u_base, prior)                    # S2
 γ       = PrecisionEstimator.update(u)  (variance) или ones (baseline)
 if attention_gate: u_eff = u · a(γ)                # S4: пред-колоночный барьер
-outcome = pipeline.tick(u_eff, γ, dt, segments, reflex_tags)
+importance = channel_importance(segments, channel_ranks)  # wᵢ=rank/dim (BACKLOG)
+outcome = pipeline.tick(u_eff, γ, dt, segments, reflex_tags, importance)
 check_finite(outcome.result)            # HostIntegrityError при NaN/inf
 drift   = DriftDetector.update(outcome.result)
 stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
@@ -103,6 +104,14 @@ escape hatch разрешён. `escape_hatch_ticks=0` → выключено.
 `tags_above_threshold(errors, segments, threshold)` — чистая функция:
 теги сегментов с агрегированной по колонкам ‖e‖² выше порога.
 
+`channel_importance(segments, ranks, *, total_dim=None, default_rank=1.0)` —
+чистая функция (BACKLOG «Честная обработка сигналов»): разворачивает важность
+канала `rank` (скаляр) в per-component веса `wᵢ = rank/dim` по срезам сегментов.
+Компенсирует скрытый вес размерности: суммарный вклад канала в F не зависит от
+`dim`. Отсутствующий тег → `default_rank`; `rank <= 0`/`default_rank <= 0` →
+`ValueError`. В loop веса включаются только при непустом
+`HostConfig.channel_ranks` (иначе `importance=None` → legacy `F = 0.5·Σγ·e²`).
+
 ## SignalBus
 
 ```python
@@ -128,6 +137,9 @@ class TickOutcome:
     result: FreeEnergyResult
     active_tags: tuple[str, ...]
     reflex_tags: tuple[str, ...]
+    activities: Vector | None = None
+    switched: bool = False
+    channel_contrib: tuple[tuple[str, float], ...] = ()  # вклад каналов в F (BACKLOG)
 
 
 @dataclass(frozen=True)
@@ -138,7 +150,8 @@ class CMCPipeline:
     observer: EnergyObserver
     active_threshold: float = 1e-8
 
-    def tick(self, u, precision, dt, segments=(), reflex_tags=()) -> TickOutcome: ...
+    def tick(self, u, precision, dt, segments=(), reflex_tags=(),
+             importance=None) -> TickOutcome: ...
 ```
 
 ## ResourceMeter / ResourceProvider (resources.py)
