@@ -1,10 +1,16 @@
 """Effectors — Imperative Shell for actuation side effects (S8 stage 6).
 
 One contract for both speech and tool invocation (ROS Action Server idiom,
-ADR-0012 §7): ``Running``/``Success``/``Failure``/``Preempted``. An effector
-never blocks the tick: ``start`` kicks off work, ``poll`` reports the current
-status, ``preempt`` aborts. Work is deferred by a deterministic number of ticks
-(``latency_ticks``) so runs are reproducible (analogous to ``DeterministicMeter``).
+ADR-0012 §7): ``Running``/``Success``/``Failure``/``Preempted``. ``start`` kicks
+off work, ``poll`` reports the current status, ``preempt`` aborts. Work is
+deferred by a deterministic number of ticks (``latency_ticks``) so runs are
+reproducible (analogous to ``DeterministicMeter``).
+
+Boundary: work runs **synchronously inside ``poll``** once the latency elapses —
+the deferral models waiting, it does not make the transport non-blocking. A long
+real call can therefore delay the tick; genuine asynchronous cancellation of an
+already-started operation is out of scope here. Preemption before the latency
+elapses cancels the **not-yet-sent** call.
 
 Tool invocation always goes through the capability gate (``ProbeEffector``,
 ADR-0005 §9): a denied or failing tool yields ``Failure`` — never a silent
@@ -64,6 +70,11 @@ class DeferredEffector:
     ``start`` фиксирует активацию и счётчик тиков; ``poll`` возвращает
     ``Running``, пока не истёк ``latency_ticks``, затем выполняет работу **один
     раз** и кэширует результат. ``preempt`` переводит в ``Preempted``.
+
+    Граница: работа выполняется **синхронно внутри ``poll``**, поэтому тик не
+    защищён от длительного реального вызова (``latency_ticks`` моделирует
+    ожидание, а не делает транспорт неблокирующим). Преемпция до истечения
+    задержки отменяет **ещё не отправленный** вызов, не начатую операцию.
 
     Attributes:
         work: Синхронная работа активации.
@@ -148,12 +159,17 @@ class ToolEffector(DeferredEffector):
         super().__init__(self._invoke, latency_ticks=latency_ticks)
 
     def _invoke(self, actuation: Actuation) -> ActuationResult:
-        """Вызвать тул через гейт и перевести результат в контракт актуации."""
+        """Вызвать тул через гейт и перевести результат в контракт актуации.
+
+        ``reason`` зондирования сохраняется в результате (атрибуция отказа:
+        Gate deny или отказ сервиса, §11) — иначе причина терялась бы при
+        переводе ``ProbeResult`` → ``ActuationResult``.
+        """
         result = self.probe.probe(
             ProbeRequest(affordance=actuation.payload, reason=actuation.goal)
         )
         status = ActuationStatus.SUCCESS if result.success else ActuationStatus.FAILURE
-        return ActuationResult(status, result.data)
+        return ActuationResult(status, result.data, reason=result.reason)
 
 
 class SpeechEffector(DeferredEffector):

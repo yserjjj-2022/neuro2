@@ -322,7 +322,9 @@ class SpeechEffector(DeferredEffector):
   привязывается к активации (`actuation=...`) — для трассы/§7.10; речевой
   эффектор кладёт текст в `ActuationResult.text`.
 - `preempt` — прервать: статус → `Preempted`, активация сбрасывается.
-- `ToolEffector` зовёт `ProbeEffector.probe` (через gate); отказ/сбой → `Failure`.
+- `ToolEffector` зовёт `ProbeEffector.probe` (через gate); отказ/сбой → `Failure`,
+  а причина (`ProbeResult.reason`) сохраняется в `ActuationResult.reason` — для
+  атрибуции отказа (Gate deny / отказ сервиса, §11).
 - `SpeechEffector` зовёт инъецированный `speak`; `None` → `Failure`.
 - Неизвестный вид/ошибка транспорта не роняют тик (эффектор возвращает `Failure`).
 
@@ -337,6 +339,9 @@ class ExecutorOutcome:
     running_goal: str | None
     impatience: float  # 0..1 — сигнал нетерпения
     completed: tuple[ActuationResult, ...]  # завершилось в этом тике → в шину
+    preemptions: int = 0  # прервано бегущих шагов (fail-safe)
+    started_goal: str | None = None  # фактически запущенная активация (start)
+    last_reason: str = ""  # причина терминального исхода (атрибуция отказа)
 
 
 class ActuatorExecutor:
@@ -392,14 +397,15 @@ class Environment(Protocol):
 @dataclass(frozen=True)
 class GoalAttempt:
     goal: Goal | None
-    reason: str  # почему цель выбрана / не выбрана
+    reason: str  # почему цель выбрана / не выбрана (+ причина отказа)
     trace: OptionTrace | None  # победитель глобального скоринга окна
     call_status: str  # статус последнего шага (success/failure/…)
     observed_after: Mapping[str, float]
     achieved: bool
     attempts: int
     chain_goal: str = ""  # корень выведенной цепочки (опция к цели)
-    launched_goal: str = ""  # фактически запущенный лист дерева
+    launched_goal: str = ""  # фактически запущенный лист (событие исполнителя)
+    planned_first_action: str = ""  # структурный план (первый Action дерева)
 
 
 class GoalDirector:
@@ -437,13 +443,21 @@ class GoalDirector:
 - **Преемпция ≠ отмена:** преемпция (смена цели) останавливает текущее дерево
   (в т.ч. внешнюю операцию через `effector.preempt()`) и запускает новое; уже
   совершённые внешние шаги не откатываются. Отмена (оператор снял исход) → дерево
-  `FAILURE`, цель `None`, пауза до следующего наблюдения.
+  `FAILURE`, цель `None`, пауза до следующего наблюдения. **Граница отмены:**
+  преемпция отменяет **ещё не отправленный** вызов (работа эффектора ещё не
+  начата); остановка уже выполняющейся внешней операции не гарантируется —
+  `DeferredEffector` выполняет работу синхронно внутри `poll`.
 - **Два вида успеха и три вида отказа (§11 SPEC):** успех вызова
   (`ActuationStatus.SUCCESS`) не подменяет успех цели (`goal_reached` по новому
   наблюдению); Gate deny (нет вызова) и отказ сервиса (вызов есть) различимы.
+  Причина отказа доходит до трассы: `ProbeResult.reason` → `ActuationResult.reason`
+  → `ExecutorOutcome.last_reason` → `goal_reason`.
 - **Три уровня трассы:** `trace` — победитель глобального скоринга окна;
-  `chain_goal` — корень выведенной цепочки; `launched_goal` — фактически
-  запущенный лист; «launched via» ссылается на реальный запуск.
+  `chain_goal` — корень выведенной цепочки; `planned_first_action` — первый
+  `Action` дерева (**структурный план**); `launched_goal` — **фактически
+  запущенный** лист (событие исполнителя `started_goal`). «launched via» ссылается
+  на реальный запуск; невыполненная предпосылка даёт `planned_first_action`, но
+  пустой `launched_goal` и причину «not launched».
 - **Сосуществование S6/S8 (§8 SPEC):** при активном S8 `HostLoop.explore()`
   подавляется, пока есть цель или действие в полёте.
 - **Сборка:** `build_host_loop` создаёт `GoalDirector` при `goal.enabled` и

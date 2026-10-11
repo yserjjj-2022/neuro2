@@ -18,6 +18,10 @@
 - **Преемпция ≠ отмена:** смена цели преемптит текущее дерево (новое — вместо
   старого, без отката внешних шагов); отсутствие цели (все исходы достигнуты)
   останавливает запуски.
+- **Граница отмены:** преемпция отменяет **ещё не отправленный** вызов (работа
+  эффектора ещё не начата) — она не гарантирует остановку уже выполняющейся
+  внешней операции. ``DeferredEffector`` выполняет работу синхронно внутри
+  ``poll``; настоящая асинхронная отмена — отдельный шаг.
 
 Functional Core / Imperative Shell (ADR-0004): решения (что делать) — чистые
 Core-функции; I/O (наблюдение, исполнение) — здесь.
@@ -96,7 +100,8 @@ class GoalAttempt:
 
     Attributes:
         goal: Выбранная цель-исход (None — все исходы удовлетворены/нет исходов).
-        reason: Почему цель выбрана/не выбрана (аудит).
+        reason: Почему цель выбрана/не выбрана (аудит); при провальном терминале
+            включает причину отказа (Gate deny / отказ сервиса, §11).
         trace: Трасса **глобального** скоринга окна (кандидаты + выбранная); None —
             не оценивалось на этом тике.
         call_status: Статус последнего шага (``running``/``success``/``failure``).
@@ -105,8 +110,11 @@ class GoalAttempt:
         attempts: Число попыток текущей цели.
         chain_goal: Имя корня выведенной цепочки (опция, достигающая конечной
             цели), "" если дерево не строилось.
-        launched_goal: Идентификатор **фактически запущенного** листа дерева
-            (первый ``Action`` выведенной цепочки), "" если запуска не было.
+        planned_first_action: Первый ``Action`` дерева в порядке обхода —
+            **структурный план** (что могло бы запуститься), не факт запуска.
+            Невыполненная предпосылка оставляет это имя, но запуска нет.
+        launched_goal: Идентификатор **фактически запущенного** листа (событие
+            запуска от исполнителя), "" если запуска не было.
     """
 
     goal: Goal | None
@@ -118,15 +126,21 @@ class GoalAttempt:
     attempts: int
     chain_goal: str = ""
     launched_goal: str = ""
+    planned_first_action: str = ""
 
 
 def _first_action(node: Node) -> Node | None:
     """Первый ``Action``-лист в порядке обхода дерева (чистая).
 
     Генератор строит ``Sequence(subtree, action)`` — исполняемый лист идёт после
-    подцели, поэтому фактически запускается **первый** ``Action`` в порядке
-    ``tick``. Возвращает None, если дерево — чистый ``Condition`` (безопасный
+    подцели, поэтому при успешном обходе фактически запускается **первый**
+    ``Action``. Возвращает None, если дерево — чистый ``Condition`` (безопасный
     отказ): тогда запуска нет.
+
+    Это **структурный план** (что могло бы запуститься), а не факт запуска:
+    невыполненная предпосылка (``Condition`` провалился) останавливает обход
+    раньше, поэтому фактический запуск берётся из события исполнителя
+    (``ExecutorOutcome.started_goal``).
 
     Args:
         node: Корень выведенного дерева.
@@ -264,6 +278,7 @@ class GoalDirector:
         self._trace: OptionTrace | None = None
         self._call_status = ""
         self._chain_goal = ""
+        self._planned_first_action = ""
         self._launched_goal = ""
 
     @property
@@ -317,6 +332,7 @@ class GoalDirector:
                     self._attempts,
                     self._chain_goal,
                     self._launched_goal,
+                    self._planned_first_action,
                 )
             if goal != active:
                 self._begin_goal(goal)  # преемптит активное дерево
@@ -339,6 +355,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         if self._goal is None or goal != self._goal:
@@ -360,6 +377,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         if self._cooldown > 0:
@@ -374,6 +392,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         return self._launch(goal, facts)
@@ -395,6 +414,7 @@ class GoalDirector:
         self._trace = None
         self._call_status = ""
         self._chain_goal = ""
+        self._planned_first_action = ""
         self._launched_goal = ""
 
     def _changed(self, goal: Goal, facts: Mapping[str, float]) -> bool:
@@ -412,8 +432,13 @@ class GoalDirector:
 
         Трассы **разделены**: ``_trace`` — победитель глобального скоринга окна
         (аудит конкуренции), ``_chain_goal`` — опция, достигающая конечной цели
-        (корень выведенной цепочки), ``_launched_goal`` — фактически запущенный
-        лист. Их совпадение не гарантировано.
+        (корень выведенной цепочки), ``_planned_first_action`` — первый ``Action``
+        дерева (структурный план), ``_launched_goal`` — **фактически запущенный**
+        лист (из события запуска исполнителя). Их совпадение не гарантировано.
+
+        Если исполнитель завершил дерево терминально, не запустив ни одного
+        действия (невыполненная предпосылка ``Condition``), фактического запуска
+        нет: фиксируем провал, а не «launched via».
         """
         context = OptionContext(
             uncertainty=0.0,
@@ -432,7 +457,8 @@ class GoalDirector:
         )
         leaf = _first_action(tree)
         self._chain_goal = tree.name
-        self._launched_goal = leaf.name if leaf is not None else ""
+        self._planned_first_action = leaf.name if leaf is not None else ""
+        self._launched_goal = ""
         # Повторная попытка: то же дерево структурно равно прошлому, а executor
         # помнит терминальный итог и не переигрывает листья. Явный сброс
         # заставляет дерево переиграться (fail-safe повтор, §7).
@@ -458,10 +484,47 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
         outcome = self.loop.tick_actuation(tree, facts)
-        if outcome is not None:
-            self._call_status = outcome.status.value
+        if outcome is None:
+            self._running = False
+            self._tree = None
+            self._finish_failed()
+            return GoalAttempt(
+                goal,
+                "executor unavailable",
+                self._trace,
+                self._call_status,
+                facts,
+                False,
+                self._attempts,
+                self._chain_goal,
+                self._launched_goal,
+                self._planned_first_action,
+            )
+        self._call_status = outcome.status.value
+        # Фактический запуск — только из события исполнителя, не из структуры.
+        self._launched_goal = outcome.started_goal or ""
+        if not self._launched_goal:
+            # Дерево терминально на старте без запуска действия: невыполненная
+            # предпосылка (Condition провалился) → честный провал попытки.
+            self._running = False
+            self._tree = None
+            self._finish_failed()
+            detail = f": {outcome.last_reason}" if outcome.last_reason else ""
+            return GoalAttempt(
+                goal,
+                f"not launched (no action started){detail}",
+                self._trace,
+                self._call_status,
+                facts,
+                False,
+                self._attempts,
+                self._chain_goal,
+                self._launched_goal,
+                self._planned_first_action,
+            )
         return GoalAttempt(
             goal,
             f"launched via {self._launched_goal}",
@@ -472,6 +535,7 @@ class GoalDirector:
             self._attempts,
             self._chain_goal,
             self._launched_goal,
+            self._planned_first_action,
         )
 
     def _achieve(
@@ -500,6 +564,7 @@ class GoalDirector:
             self._attempts,
             self._chain_goal,
             self._launched_goal,
+            self._planned_first_action,
         )
 
     def _advance(self, facts: Mapping[str, float]) -> GoalAttempt:
@@ -520,6 +585,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         self._elapsed += 1
@@ -536,6 +602,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         tree = self._tree
@@ -552,6 +619,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
         outcome = self.loop.tick_actuation(tree, facts)
         if outcome is None:
@@ -568,9 +636,14 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         self._call_status = outcome.status.value
+        if outcome.started_goal:
+            # Многошаговая цепочка: на этом тике фактически запущен следующий
+            # лист — трасса запуска отражает последний реальный запуск.
+            self._launched_goal = outcome.started_goal
         if outcome.status is NodeStatus.RUNNING:
             return GoalAttempt(
                 goal,
@@ -582,6 +655,7 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
 
         # Терминальный статус → новое наблюдение и проверка успеха цели.
@@ -602,11 +676,13 @@ class GoalDirector:
                 self._attempts,
                 self._chain_goal,
                 self._launched_goal,
+                self._planned_first_action,
             )
         self._finish_failed()
+        detail = f": {outcome.last_reason}" if outcome.last_reason else ""
         return GoalAttempt(
             goal,
-            "goal not reached",
+            f"goal not reached{detail}",
             self._trace,
             self._call_status,
             after,
@@ -614,6 +690,7 @@ class GoalDirector:
             self._attempts,
             self._chain_goal,
             self._launched_goal,
+            self._planned_first_action,
         )
 
     def _finish_failed(self) -> None:
@@ -653,4 +730,5 @@ class GoalDirector:
         self._elapsed = 0
         self._goal_value = None
         self._chain_goal = ""
+        self._planned_first_action = ""
         self._launched_goal = ""

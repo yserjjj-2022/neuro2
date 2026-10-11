@@ -291,24 +291,28 @@ class TestLifecycle:
         finally:
             loop.close()
 
-    def test_goal_change_stops_external_operation(self, tmp_path: Path) -> None:
-        """Смена цели преемптит внешнюю операцию (не только внутренний reset).
+    def test_goal_change_cancels_pending_call(self, tmp_path: Path) -> None:
+        """Смена цели отменяет **ещё не отправленный** вызов (не начатую работу).
 
-        Долгий вызов A (``latency_ticks`` велик, работа ещё не выполнена) сменяется
-        на B: преемпция через executor должна **остановить** эффектор A — работа A
-        не выполняется вовсе (``service_a`` не в ``calls``), запускается B.
+        Граница гарантии: ``DeferredEffector`` выполняет работу синхронно внутри
+        ``poll`` после ``latency_ticks``; до этого момента транспорт не вызван.
+        Преемпция до истечения задержки предотвращает вызов A (``service_a`` не в
+        ``calls``) — отменяется **ожидающий** вызов, а не уже выполняющаяся
+        внешняя операция. Остановка уже начатого (синхронного) транспорта этим
+        контуром не гарантируется и вынесена отдельным шагом.
         """
         env = AbEnvironment()
         outcomes = ab_outcomes()
         loop = _build(tmp_path, env, outcomes=outcomes, latency_ticks=6)
         try:
-            loop.step_once(0)  # launch service_a (running, работа не завершена)
+            loop.step_once(0)  # launch service_a (running, работа ещё не начата)
             assert loop.last_goal_telemetry[0] == "a_serviced"
-            # Оператор снял исход A → преемпция: A не должен выполниться.
+            # Оператор снял исход A → преемпция до вызова транспорта: A не должен
+            # выполниться вовсе.
             loop.goal_director.outcomes = (outcomes[1],)
             for tick in range(1, 12):
                 loop.step_once(tick)
-            assert "service_a" not in env.calls  # внешняя операция остановлена
+            assert "service_a" not in env.calls  # ожидающий вызов отменён
             assert env.calls == ["service_b"]
         finally:
             loop.close()
@@ -392,7 +396,7 @@ class TestLaunchTrace:
         ``service_a`` требует предпосылку ``B обслужен`` (``guard``). Цепочка по
         цели A становится ``Sequence(service_b, service_a)``: корень цепочки —
         ``tool:service_a``, но **фактически запускается** первый лист —
-        ``tool:service_b``. Трасса запуска берёт лист, а не корень.
+        ``tool:service_b``. Трасса запуска берёт событие исполнителя, а не корень.
         """
         env = AbEnvironment()
 
@@ -403,8 +407,16 @@ class TestLaunchTrace:
             def active_task(self) -> str:
                 return ""
 
-            def tick_actuation(self, root, facts=None):
-                return ExecutorOutcome(NodeStatus.RUNNING, "tool:service_b", 0.0, ())
+            def tick_actuation(
+                self, root: Node, facts: dict[str, float] | None = None
+            ) -> ExecutorOutcome:
+                return ExecutorOutcome(
+                    NodeStatus.RUNNING,
+                    "tool:service_b",
+                    0.0,
+                    (),
+                    started_goal="tool:service_b",
+                )
 
         declarations = (
             OptionDeclaration(
@@ -423,5 +435,98 @@ class TestLaunchTrace:
         )
         attempt = director.tick(0)
         assert attempt.chain_goal == "tool:service_a"  # корень выведенной цепочки
-        assert attempt.launched_goal == "tool:service_b"  # фактический лист
+        # Структурный план — первый Action дерева (что могло бы запуститься).
+        assert attempt.planned_first_action == "tool:service_b"
+        # Фактический запуск — из события исполнителя, не из структуры.
+        assert attempt.launched_goal == "tool:service_b"
         assert attempt.reason == "launched via tool:service_b"
+
+    def test_unreachable_precondition_not_launched(self, tmp_path: Path) -> None:
+        """Невыполненная предпосылка → нет запуска, хотя Action есть в дереве.
+
+        ``service_a`` требует предпосылку ``B обслужен``, но B недостижим (нет
+        действия, делающего B истинным). Цепочка вырождается в провал
+        ``Condition``: исполнитель завершает дерево, не запустив ни одного
+        действия. Директор обязан **не** писать «launched via» — только
+        структурный план и честный провал.
+        """
+        env = AbEnvironment()
+
+        class _StubLoop:
+            probe_effector = types.SimpleNamespace(affordances=ab_affordances())
+            executor = None
+
+            def active_task(self) -> str:
+                return ""
+
+            def tick_actuation(
+                self, root: Node, facts: dict[str, float] | None = None
+            ) -> ExecutorOutcome:
+                # Дерево терминально на старте без запуска действия.
+                return ExecutorOutcome(NodeStatus.FAILURE, None, 0.0, ())
+
+        declarations = (
+            OptionDeclaration(
+                "tool:service_a",
+                effect=Effect(A_SERVICED, value=1.0),
+                guard=Guard(B_SERVICED, 1.0),  # предпосылка недостижима
+            ),
+        )
+        director = GoalDirector(
+            loop=_StubLoop(),  # type: ignore[arg-type]
+            outcomes=(ab_outcomes()[0],),  # только A
+            declarations=declarations,
+            environment=env,
+            max_depth=3,
+        )
+        attempt = director.tick(0)
+        assert attempt.launched_goal == ""  # фактического запуска нет
+        assert attempt.planned_first_action == "tool:service_a"  # план был
+        assert attempt.reason.startswith("not launched")
+        assert env.calls == []  # транспорт не тронут
+
+    def test_launch_event_absent_when_tree_fails_before_action(
+        self, tmp_path: Path
+    ) -> None:
+        """Настоящая невыполненная предпосылка в среде → провал без вызова.
+
+        Предпосылка ``B обслужен`` недостижима: ``service_b`` не входит в окно
+        (только ``service_a`` с guard на B). ``backward_chain`` вырождает цепочку
+        в провал ``Condition``, реальный исполнитель завершает дерево без запуска
+        — ``service_a`` не вызывается, ``launched_goal`` пуст.
+        """
+        env = AbEnvironment()  # B не обслужен и не может быть обслужен
+        from src.mcp.probe import AffordanceMap
+
+        only_a = AffordanceMap(
+            tuple(a for a in ab_affordances().affordances if a.name == "service_a")
+        )
+        cfg = HostConfig(
+            memory=MemoryConfig(enabled=False),
+            log_path=str(tmp_path / "t.jsonl"),
+            autonomy=AutonomyConfig(enabled=True),
+            actuation=ActuationConfig(enabled=True),
+            goal=GoalConfig(enabled=True, outcomes=ab_outcomes()),
+            option_declarations=(
+                OptionDeclaration(
+                    "tool:service_a",
+                    effect=Effect(A_SERVICED, value=1.0),
+                    guard=Guard(B_SERVICED, 1.0),
+                ),
+            ),
+        )
+        loop = build_host_loop(
+            cfg,
+            meter=DeterministicMeter(),
+            probe_fn=env.probe_fn,
+            affordances=only_a,
+            environment=env,
+        )
+        try:
+            attempt = loop.goal_director.tick(0)  # type: ignore[union-attr]
+            assert env.calls == []  # действие не запущено
+            assert attempt.launched_goal == ""
+            assert attempt.planned_first_action == "tool:service_a"  # план был
+            assert attempt.achieved is False
+        finally:
+            loop.close()

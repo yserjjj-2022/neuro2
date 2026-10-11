@@ -374,12 +374,16 @@ class ActuationResult:
         actuation: Исполняемая активация (для трассы/§7.10); None — если
             результат не привязан к активации (совместимость).
         text: Текст реплики (для речи, §7.10); None — не речь/пусто.
+        reason: Причина исхода (аудит/атрибуция отказа, §11): например, отказ
+            Gate (``denied ...``) или отказ сервиса (``probe error: ...``).
+            Пусто — причина не объявлена (совместимость).
     """
 
     status: ActuationStatus
     data: tuple[float, ...] = ()
     actuation: Actuation | None = None
     text: str | None = None
+    reason: str = ""
 
 
 @dataclass(frozen=True)

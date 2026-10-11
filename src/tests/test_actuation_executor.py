@@ -143,12 +143,14 @@ class TestAdapters:
         assert len(result.data) == 3
 
     def test_tool_denied_is_failure(self) -> None:
-        """Отказ гейта → Failure."""
+        """Отказ гейта → Failure, причина (denied) сохранена для атрибуции."""
         effector = ToolEffector(self._probe(granted=frozenset({Capability.READ})))
         effector.start(
             Actuation(ActuationKind.INVOKE_TOOL, "tool:web_search", "web_search")
         )
-        assert effector.poll().status is ActuationStatus.FAILURE
+        result = effector.poll()
+        assert result.status is ActuationStatus.FAILURE
+        assert "denied" in result.reason  # причина Gate доходит до результата
 
     def test_speech_success_and_failure(self) -> None:
         """Речь: текст → Success, None → Failure."""
@@ -300,6 +302,45 @@ class TestActuatorExecutor:
             ]
 
         assert run() == run()
+
+    def test_started_goal_reports_actual_launch(self) -> None:
+        """``started_goal`` — событие запуска, а не структурный обход дерева."""
+        ex = _executor()
+        root = _action("a")
+        first = ex.tick(root, {})
+        assert first.started_goal == "a"  # effector.start вызван
+        # Повторный тик: start не вызывается (goal уже бежит) → нет события.
+        second = ex.tick(root, {})
+        assert second.started_goal is None
+
+    def test_no_started_goal_when_guard_blocks(self) -> None:
+        """Невыполненная предпосылка → нет запуска (started_goal None, Failure)."""
+        net = Fact("network_available")
+        root = Node(
+            NodeKind.SEQUENCE,
+            children=(
+                Node(NodeKind.CONDITION, name="net", guard=Guard(net, 0.5)),
+                _action("a"),
+            ),
+        )
+        ex = _executor()
+        outcome = ex.tick(root, {"network_available": 0.0})
+        assert outcome.status is NodeStatus.FAILURE
+        assert outcome.started_goal is None  # действие не запущено
+        assert ex.done
+
+    def test_last_reason_carries_refusal(self) -> None:
+        """Причина отказа (из ActuationResult.reason) доходит до outcome."""
+
+        def refused(_a: Actuation) -> ActuationResult:
+            return ActuationResult(ActuationStatus.FAILURE, reason="denied probe: a")
+
+        ex = _executor(work=refused)
+        root = _action("a")
+        ex.tick(root, {})  # start
+        outcome = ex.tick(root, {})  # poll → terminal failure
+        assert outcome.status is NodeStatus.FAILURE
+        assert outcome.last_reason == "denied probe: a"
 
     def test_expected_ticks_validation(self) -> None:
         """expected_ticks < 0 → ValueError."""

@@ -22,7 +22,7 @@ from src.config import (
 )
 from src.core.actuation import Effect
 from src.host.gate import CapabilityGate
-from src.host.loop import build_host_loop
+from src.host.loop import HostLoop, build_host_loop
 from src.host.sensitivity import DeterministicMeter
 from src.tests.ab_environment import (
     A_SERVICED,
@@ -117,19 +117,21 @@ class TestAcceptanceScenarios:
             loop.close()
 
     def test_gate_deny_no_call(self, tmp_path: Path) -> None:
-        """Gate deny → запрос не доходит до сервиса (calls пуст), цель открыта.
+        """Gate deny → запрос не доходит до сервиса (calls пуст), причина в трассе.
 
         Это проверка **авторизации**: право ``ACT_REVERSIBLE`` отозвано, поэтому
         ``ProbeEffector`` отклоняет запрос до транспорта. Раньше это называлось
-        «запретом действия», но фактически проверяло отказ сервиса.
+        «запретом действия», но фактически проверяло отказ сервиса. Причина отказа
+        (``denied ...``) доходит до ``goal_reason``.
         """
         env = AbEnvironment()
         loop = _build(tmp_path, env, gate=ab_gate_denying("service_a"))
         try:
-            loop.run(5)
+            reasons = [self._step(loop, tick)[1] for tick in range(5)]
             assert env.calls == []  # deny до вызова — сервис не тронут
             assert env.observe()["a_serviced"] == 0.0
             assert loop.last_goal_telemetry[3] is False
+            assert any("denied" in reason for reason in reasons)  # авторизация
         finally:
             loop.close()
 
@@ -138,17 +140,25 @@ class TestAcceptanceScenarios:
 
         Отличие от Gate deny: запрос **дошёл** до транспорта (``calls`` содержит
         сервис), но сервис ответил ошибкой → состояние не изменилось, цель
-        остаётся открытой.
+        остаётся открытой. Причина (``probe error``) доходит до ``goal_reason`` —
+        атрибуция отказа отличается от Gate deny.
         """
         env = AbEnvironment(forbid=("service_a",))
         loop = _build(tmp_path, env, max_attempts=1)
         try:
-            loop.run(5)
+            reasons = [self._step(loop, tick)[1] for tick in range(5)]
             assert env.calls == ["service_a"]  # вызов состоялся
             assert env.observe()["a_serviced"] == 0.0
             assert loop.last_goal_telemetry[3] is False
+            assert any("probe error" in reason for reason in reasons)  # сервис
         finally:
             loop.close()
+
+    @staticmethod
+    def _step(loop: HostLoop, tick: int) -> tuple[str, str, int, bool, str, str]:
+        """Сделать тик и вернуть телеметрию цели (для сбора причин по тикам)."""
+        loop.step_once(tick)
+        return loop.last_goal_telemetry
 
     def test_success_without_state_change_bounded(self, tmp_path: Path) -> None:
         """Успех вызова без изменения состояния → цель не закрыта, ≤ max_attempts."""
@@ -194,18 +204,20 @@ class TestFControl:
         env_a = AbEnvironment(b_serviced=1.0)  # только A требует обслуживания
         loop_a = _build(tmp_path / "a", env_a)
         try:
-            loop_a.run(2)
+            loop_a.step_once(0)  # тик выбора: цель выбрана, запущен service_a
             f_a = loop_a.last_free_energy
             goal_a = loop_a.last_goal_telemetry[0]
+            loop_a.step_once(1)  # завершение вызова
         finally:
             loop_a.close()
 
         env_b = AbEnvironment(a_serviced=1.0)  # только B требует обслуживания
         loop_b = _build(tmp_path / "b", env_b)
         try:
-            loop_b.run(2)
+            loop_b.step_once(0)  # тик выбора: цель выбрана, запущен service_b
             f_b = loop_b.last_free_energy
             goal_b = loop_b.last_goal_telemetry[0]
+            loop_b.step_once(1)  # завершение вызова
         finally:
             loop_b.close()
 
@@ -214,7 +226,8 @@ class TestFControl:
         assert goal_b == "b_serviced"
         assert env_a.calls == ["service_a"]
         assert env_b.calls == ["service_b"]
-        # Возбуждение сопоставимо (не «сработал другой порог готовности»).
+        # Возбуждение сопоставимо на **тике выбора** (не «сработал другой порог
+        # готовности»): F зафиксирована сразу после step_once(0).
         assert abs(f_a - f_b) < 1e-6, (f_a, f_b)
 
     def test_determinism(self, tmp_path: Path) -> None:
