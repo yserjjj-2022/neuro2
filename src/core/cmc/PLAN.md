@@ -114,3 +114,21 @@
 - **Stacking**: `np.stack([s.e for s in states])` → shape `(N, input_dim)`. Не `np.array` (может дать object array при разных shapes — но валидация гарантирует одинаковые)
 - **Debug logging**: `logger.debug` при fail-fast валидациях — best effort, не покрывается тестом
 - **Удаление Column**: `src/core/__init__.py` — единственный импортёр `Column` (подтверждено grep). Одновременное обновление `__init__.py` + `cmc/__init__.py` гарантирует, что импорт пакета не сломается
+
+## Аддендум: проекции колонок (ADR-0013, 2026-10-11)
+
+Реализовано поверх Фазы 1 (детали — ADR-0013, `SPEC.md`):
+
+- `src/core/cmc/projection.py` — `resolve_reads(reads, segment_dims)` (имена →
+  бинарная маска), `segment_names(mask, segment_dims)` (наблюдаемость). Чистые,
+  fail-fast: неизвестный/пустой/повтор имени, пустая карта, `dim <= 0`.
+- `ColumnConfig.reads: tuple[str, ...] | None` (None → весь вход, legacy).
+- `column_step(cfg, u, prev, mask=None)` — маска «не наблюдается»:
+  `x = x + α·m⊙(u−x)`, `e = m⊙(u−x)`. `mask=None` → прежние формулы.
+- `CMCEnsemble(columns, active_threshold, segment_dims=None)` — разрешает reads
+  в маски при сборке; `resolved_reads` — фактические reads колонок.
+- `ColumnParams.reads` → `build_cmc_pipeline(segment_dims=...)` →
+  `build_host_loop` (полная карта входа, включая `memory`).
+- Тесты: `test_cmc_projection.py`, маска в `test_cmc_column.py`, избирательность/
+  legacy/перекрытие/ничья в `test_cmc_ensemble.py`, host-интеграция в
+  `test_host_loop.py::TestColumnReads`.

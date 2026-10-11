@@ -297,7 +297,7 @@ B (мета-пластичность, само-модель) — горизон�
 | ID | Заголовок | Контекст | Приоритет | Дата |
 |----|-----------|----------|-----------|------|
 | [Phase2][sensors] Медленный такт источников | period per channel | Поле `period` есть в SignalBus | P2 | 2026-09-26 |
-| [Phase2][sensors] Проекции колонок | ColumnConfig.reads | O(Σ dim(slice)) вместо O(N·D) | P2 | 2026-09-26 |
+| [Phase2][sensors] Проекции колонок (reads) ✅ | Реализовано: `ColumnConfig.reads` + `resolve_reads` (`cmc/projection.py`), маска полного входа внутри `column_step` (ADR-0013); избирательность, `resolved_reads`, legacy `reads=None`. Остаётся: нормировка активностей (mean), разные alpha, единицы каналов — отдельные шаги | ADR-0013 | P1 | 2026-10-11 |
 | [Phase2][sensors] Реальные интеграции ✅ | datetime → psutil → MCP | Реестр + MCP-транспорт stdio (ADR-0011); HTTP/Resources — P2 | P1 | 2026-09-26 |
 | [Phase2][tech-debt] Purity Test для Calculator | Одинаковый вход → одинаковый выход | Прямой тест свойства | P2 | 2025-01-16 |
 | [Phase2][tech-debt] Восстановление Observer при перезапуске | prev_f/prev_stress из memory | Интеграция с последним эпизодом | P2 | 2025-01-16 |

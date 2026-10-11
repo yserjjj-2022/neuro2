@@ -35,10 +35,13 @@ if text != last_text:
     query = memory.context_embedding(text)         # S2 (event-triggered)
     prior = memory.recall_prior(query)             # S2
 u       = concat(u_base, prior)                    # S2
+segments = bus.segments + memory-сегмент           # полная карта входа
 γ       = PrecisionEstimator.update(u)  (variance) или ones (baseline)
 if attention_gate: u_eff = u · a(γ)                # S4: пред-колоночный барьер
 importance = channel_importance(segments, channel_ranks)  # wᵢ=rank/dim (BACKLOG)
 outcome = pipeline.tick(u_eff, γ, dt, segments, reflex_tags, importance)
+# колонки читают свои reads (маска сегментов, ADR-0013):
+#   x_{j,t} = x_{j,t-1} + α_j·m_j⊙(u−x_{j,t-1}); e_{j,t} = m_j⊙(u−x_{j,t})
 check_finite(outcome.result)            # HostIntegrityError при NaN/inf
 drift   = DriftDetector.update(outcome.result)
 stored  = memory.maybe_store(...)       # S2: значимое событие → эпизод
@@ -80,6 +83,13 @@ escape hatch разрешён. `escape_hatch_ticks=0` → выключено.
 обрабатывается **один раз при появлении**. Между сообщениями сеть/recall не
 трогаются; хранится последний приор (нули до первого сообщения). Приор
 держится до следующего сообщения (затухание веса — BACKLOG).
+
+**Проекции колонок** (ADR-0013): каждая колонка читает объявленные сегменты
+шины (`ColumnParams.reads`) — маска полного вектора, разрешаемая при сборке по
+полной карте входа (включая `memory`). `reads=None` → весь вход (legacy).
+Активность — `Σ e²` (legacy), FFF — сумма по колонкам; перекрытие reads
+увеличивает вклад канала. Фактические reads логируются при сборке
+(`ensemble.resolved_reads`).
 
 `memory=None` / `MemoryConfig(enabled=False)` → контур S1 (prior не
 добавляется, `total_dim == bus_dim`). Сегмент памяти:
@@ -765,7 +775,8 @@ Ablation выключает генератор (пустое окно) — це�
 ## Явно НЕ входит
 
 - Реальные интеграции (datetime/psutil/MCP) — позже
-- Проекции колонок (reads) — S2+
+- Нормировка активностей (mean по reads), разные alpha, единицы каналов,
+  a-priori ошибка, вывод весов attention-гейта — отдельные шаги (ADR-0013 §9)
 - Внешние действия / capability gate в полном виде (T2/HITL) — S5/S6
 - Полный control channel (inject/set/snapshot/restore/freeze/kill) — позже
 - Полный обход attractor/dwell рефлексом — осознанный техдолг (решение

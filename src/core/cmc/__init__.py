@@ -10,6 +10,7 @@ from .attention import apply_attention, attention_gate
 from .column import column_step
 from .ensemble import CMCEnsemble
 from .models import ColumnConfig, ColumnState, EnsembleOutput
+from .projection import resolve_reads, segment_names
 
 __all__ = [
     "CMCEnsemble",
@@ -19,4 +20,6 @@ __all__ = [
     "apply_attention",
     "attention_gate",
     "column_step",
+    "resolve_reads",
+    "segment_names",
 ]

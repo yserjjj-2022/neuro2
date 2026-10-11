@@ -103,10 +103,14 @@ class ColumnParams:
     Attributes:
         specialization: Тег специализации ("tone", "rhythm", ...).
         alpha: Скорость обновления состояния, α ∈ [0, 1].
+        reads: Имена сегментов шины, которые читает колонка (ADR-0013).
+            None → весь вход (legacy). Пустой кортеж → ошибка (колонка без
+            входа).
     """
 
     specialization: str = "general"
     alpha: float = 0.1
+    reads: tuple[str, ...] | None = None
 
     def build(self, input_dim: int, state_dim: int) -> ColumnConfig:
         """Собрать ColumnConfig под конкретные размерности шины.
@@ -123,6 +127,7 @@ class ColumnParams:
             state_dim=state_dim,
             specialization=self.specialization,
             alpha=self.alpha,
+            reads=self.reads,
         )
 
 

@@ -20,6 +20,7 @@ gives deterministic, replay-friendly runs; ``"wall"`` measures real time.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -74,6 +75,8 @@ from src.memory import (
 )
 from src.memory.consolidation import should_consolidate
 from src.telemetry import TelemetryLogger, TelemetryWriter
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -979,6 +982,16 @@ def build_host_loop(
     if len(columns) < config.k:
         raise ValueError(f"k={config.k} exceeds number of columns {len(columns)}")
 
+    # Полная карта входных сегментов ансамбля — для разрешения reads (ADR-0013).
+    # Включает memory-сегмент (вне реестра): часть входа не должна остаться
+    # недоступной явной конфигурации проекций.
+    input_segments = bus.segments
+    if prior_dim > 0:
+        input_segments = input_segments + (
+            BusSegment(name="memory", offset=bus.bus_dim, dim=prior_dim, period=1),
+        )
+    segment_dims = {seg.name: seg.dim for seg in input_segments}
+
     pipeline = build_cmc_pipeline(
         columns=columns,
         k=config.k,
@@ -986,7 +999,17 @@ def build_host_loop(
         active_threshold=config.active_threshold,
         attractor=config.attractor.build(n_tasks=len(columns)),
         calculator=config.energy.build(),
+        segment_dims=segment_dims,
     )
+    resolved = pipeline.ensemble.resolved_reads
+    if any(cfg.reads is not None for cfg in columns):
+        _log.info(
+            "column reads: %s",
+            ", ".join(
+                f"{cfg.specialization}={list(names)}"
+                for cfg, names in zip(columns, resolved, strict=True)
+            ),
+        )
 
     writer = TelemetryWriter(log_path=Path(config.log_path))
     logger = TelemetryLogger(writer=writer, phase="phase1", mode="free")

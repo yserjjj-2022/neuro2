@@ -25,17 +25,22 @@ class ColumnConfig:
     Attributes:
         input_dim: Размерность входа L4.
         state_dim: Размерность состояния L5/6. В Фазе 1 == input_dim.
-        specialization: Тег колонки ("tone", "rhythm", "meaning", ...).
-            В Фазе 1 не влияет на вычисления — проекции по специализациям
-            появятся в Фазе 2 вместе с матрицами весов.
+        specialization: Тег колонки ("tone", "rhythm", "meaning", ...) —
+            идентификатор специализации в выборе задачи (k-WTA по тегу).
         alpha: Скорость обновления состояния, α ∈ [0, 1].
-            x(t) = x(t-1) + α·(u(t) − x(t-1)). Дефолт 0.1 (≈10 тиков адаптации).
+            x(t) = x(t-1) + α·m⊙(u(t) − x(t-1)). Дефолт 0.1 (≈10 тиков).
+        reads: Имена сегментов шины, которые читает колонка (ADR-0013).
+            None → весь вход (legacy, m ≡ 1). Пустой кортеж → ValueError
+            (колонка без входа). Имена разрешаются в бинарную маску при сборке
+            ансамбля (Shell), не здесь. Проекция — маска полного вектора, не
+            подвектор (инвариант [N, In, State], CONSTITUTION §2.1).
     """
 
     input_dim: int
     state_dim: int
     specialization: str = "general"
     alpha: float = 0.1
+    reads: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.input_dim <= 0:
@@ -49,6 +54,11 @@ class ColumnConfig:
             )
         if not 0.0 <= self.alpha <= 1.0:
             raise ValueError(f"alpha must be in [0, 1], got {self.alpha}")
+        if self.reads is not None:
+            if not self.reads:
+                raise ValueError("reads must not be empty (column without input)")
+            if any(not name for name in self.reads):
+                raise ValueError("reads segment names must not be empty")
 
 
 @dataclass(frozen=True)

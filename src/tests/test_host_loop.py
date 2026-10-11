@@ -318,6 +318,98 @@ class TestChannelImportance:
         assert loop.importance[battery_seg.offset] == pytest.approx(5.0)
 
 
+class TestColumnReads:
+    """Проекции колонок через reads (ADR-0013): сборка, избирательность, legacy."""
+
+    def _config(self, tmp_path: Path, **kwargs: object) -> HostConfig:
+        return HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(enabled=False),
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_reads_unknown_segment_fail_fast(self, tmp_path: Path) -> None:
+        """Неизвестный сегмент в reads → ValueError при сборке (до тика)."""
+        from src.config import ColumnParams
+
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(enabled=False),
+            columns=(
+                ColumnParams(specialization="x", reads=("banana",)),
+                ColumnParams(specialization="y"),
+            ),
+        )
+        with pytest.raises(ValueError):
+            build_host_loop(config)
+
+    def test_reads_selective_by_segment(self, tmp_path: Path) -> None:
+        """Возмущение battery меняет только колонку, читающую battery."""
+        from src.config import ColumnParams
+
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(enabled=False),
+            columns=(
+                ColumnParams(specialization="battery_only", reads=("battery",)),
+                ColumnParams(specialization="circadian_only", reads=("circadian",)),
+            ),
+        )
+        loop = build_host_loop(config)
+        loop.close()
+        assert loop.pipeline.ensemble.resolved_reads == (
+            ("battery",),
+            ("circadian",),
+        )
+
+    def test_reads_legacy_default_is_full_input(self, tmp_path: Path) -> None:
+        """Дефолт (без reads) → колонки читают весь вход (legacy)."""
+        config = self._config(tmp_path)
+        loop = build_host_loop(config)
+        loop.close()
+        full = tuple(s.name for s in loop.bus.segments)
+        assert all(names == full for names in loop.pipeline.ensemble.resolved_reads)
+
+    def test_reads_include_memory_segment(self, tmp_path: Path) -> None:
+        """Карта входа включает memory-сегмент (ADR-0013 §7)."""
+        from src.config import ColumnParams
+
+        config = HostConfig(
+            log_path=str(tmp_path / "run.jsonl"),
+            memory=MemoryConfig(db_path=str(tmp_path / "m.db")),
+            columns=(
+                ColumnParams(specialization="mem", reads=("memory",)),
+                ColumnParams(specialization="bat", reads=("battery",)),
+            ),
+        )
+        loop = build_host_loop(config, meter=ResourceMeter())
+        loop.close()
+        assert loop.pipeline.ensemble.resolved_reads == (("memory",), ("battery",))
+
+    def test_reads_change_bus_dims_unchanged(self, tmp_path: Path) -> None:
+        """Проекции не меняют размерность входа (маска, не подвектор)."""
+        from src.config import ColumnParams
+
+        base = self._config(tmp_path / "a")
+        loop_base = build_host_loop(base)
+        total_base = loop_base.total_dim
+        loop_base.close()
+
+        projected = HostConfig(
+            log_path=str(tmp_path / "b.jsonl"),
+            memory=MemoryConfig(enabled=False),
+            columns=(
+                ColumnParams(specialization="bat", reads=("battery",)),
+                ColumnParams(specialization="cir", reads=("circadian",)),
+            ),
+        )
+        loop_proj = build_host_loop(projected)
+        total_proj = loop_proj.total_dim
+        loop_proj.close()
+
+        assert total_base == total_proj
+
+
 class TestHostLoopMechanics:
     """Механика loop: precision, время, валидация, graceful shutdown."""
 

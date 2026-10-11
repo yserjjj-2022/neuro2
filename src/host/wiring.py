@@ -11,6 +11,7 @@ FreeEnergyResult (result.f, result.valence, ...), isolating interface desync.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -233,6 +234,7 @@ def build_cmc_pipeline(
     active_threshold: float = 1e-8,
     attractor: TaskAttractor | None = None,
     calculator: FreeEnergyCalculator | None = None,
+    segment_dims: Mapping[str, int] | None = None,
 ) -> CMCPipeline:
     """Собирает per-tick конвейер: CMC → voting → attractors → energy.
 
@@ -248,12 +250,18 @@ def build_cmc_pipeline(
         active_threshold: Порог активности колонки/сегмента.
         attractor: Готовый TaskAttractor (из config). None → дефолт.
         calculator: Готовый FreeEnergyCalculator (из config). None → дефолт.
+        segment_dims: Карта входных сегментов ``{имя: длина}`` для разрешения
+            ``reads`` колонок (ADR-0013). None → проекции не задействованы.
 
     Returns:
         CMCPipeline — готовый к tick(u, precision, dt).
     """
     del log_path  # телеметрия переехала в loop
-    ensemble = CMCEnsemble(columns=columns, active_threshold=active_threshold)
+    ensemble = CMCEnsemble(
+        columns=columns,
+        active_threshold=active_threshold,
+        segment_dims=segment_dims,
+    )
     voting = VotingManager(k=k)
     if attractor is None:
         attractor = TaskAttractor(n_tasks=len(columns))
