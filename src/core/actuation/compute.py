@@ -55,6 +55,7 @@ from src.core.actuation.models import (
     OptionSource,
     OptionTrace,
     OptionWindow,
+    PreferredOutcome,
     Regularity,
     TickContext,
     TickMemory,
@@ -133,9 +134,13 @@ def score_option(
     ``BUILTIN`` pragmatic появится на этапе 2 (стык с ``core/policy``) —
     сейчас тот же дефолт, но с иным reason (аудит).
 
+    Этап 6 (аддитивно): если ``context.goal`` задан, прагматическая ценность —
+    доля закрытия текущего разрыва до цели (``effect_gain``). Без цели
+    поведение этапов 1–5 сохраняется (``pragmatic = 0``).
+
     Args:
         option: Любая опция (известная или нет — не падает).
-        context: Состояние для оценки (неопределённость, задача, режим).
+        context: Состояние для оценки (неопределённость, задача, режим, цель).
         preferences: Веса/пороги скорера.
 
     Returns:
@@ -144,6 +149,11 @@ def score_option(
     epistemic, reason = _epistemic_default(context, option, preferences)
     if option.source is OptionSource.BUILTIN:
         reason = f"builtin pragmatic undefined (stage 2): {reason}"
+    if context.goal is not None:
+        pragmatic = effect_gain(option, context.goal, context.facts)
+        if pragmatic > 0.0:
+            reason = f"pragmatic toward {context.goal.fact.name}: {reason}"
+        return pragmatic, epistemic, reason
     return 0.0, epistemic, reason
 
 
@@ -252,6 +262,120 @@ def regularity_cost(
     return sum(
         regularity.weight * evaluate_fact(regularity.fact, state)
         for regularity in regularities
+    )
+
+
+def unsatisfied_outcomes(
+    outcomes: Sequence[PreferredOutcome], facts: Mapping[str, float]
+) -> tuple[PreferredOutcome, ...]:
+    """Отобрать неудовлетворённые предпочтительные исходы (чистая, этап 6).
+
+    Исход неудовлетворён, если ``evaluate_fact(fact, facts) < target``. Порядок
+    — по ``priority`` убыв., тай-брейк — порядок объявления (детерминизм).
+    Пустой вход → ``()`` (нет исходов — нет цели).
+
+    Args:
+        outcomes: Предпочтительные исходы.
+        facts: Снимок фактов мира.
+
+    Returns:
+        Неудовлетворённые исходы по приоритету.
+    """
+    unsatisfied = [
+        outcome
+        for outcome in outcomes
+        if evaluate_fact(outcome.fact, facts) < outcome.target
+    ]
+    unsatisfied.sort(key=lambda outcome: -outcome.priority)
+    return tuple(unsatisfied)
+
+
+def select_goal(
+    outcomes: Sequence[PreferredOutcome], facts: Mapping[str, float]
+) -> Goal | None:
+    """Выбрать цель-исход из предпочтений и снимка фактов (чистая, этап 6).
+
+    Цель **не выводится из тега колонки** — она формируется из сочетания
+    предпочтительных исходов и текущих фактов (ADR-0014). Берётся первый
+    неудовлетворённый исход по приоритету; если все удовлетворены или исходов
+    нет → ``None`` (действия не запускаются).
+
+    Args:
+        outcomes: Предпочтительные исходы.
+        facts: Снимок фактов мира.
+
+    Returns:
+        Goal(fact, target) или None.
+    """
+    pending = unsatisfied_outcomes(outcomes, facts)
+    if not pending:
+        return None
+    best = pending[0]
+    return Goal(best.fact, best.target)
+
+
+def goal_reached(goal: Goal, facts: Mapping[str, float]) -> bool:
+    """Проверить достижение цели по снимку фактов (чистая, этап 6).
+
+    Эквивалентно ``guard_holds(Guard(goal.fact, goal.value), facts)``:
+    наблюдаемое значение факта достигло целевого.
+
+    Args:
+        goal: Цель-исход.
+        facts: Снимок фактов мира.
+
+    Returns:
+        True, если факт достиг целевого значения.
+    """
+    return guard_holds(Guard(goal.fact, goal.value), facts)
+
+
+def effect_gain(option: Option, goal: Goal, facts: Mapping[str, float]) -> float:
+    """Доля закрытия текущего разрыва до цели (чистая, этап 6, ADR-0015).
+
+    ``effect.value`` — **прогнозируемое итоговое значение факта** ∈ [0, 1]
+    (не приращение), поэтому ``gap_after = goal.value − effect.value``
+    применяется напрямую. Чужой эффект (``effect.fact.name != goal.fact.name``)
+    или отсутствие эффекта → ``0.0``; уже достигнутая цель
+    (``gap_before <= ε``) → ``0.0``.
+
+    Args:
+        option: Опция с (возможным) объявленным эффектом.
+        goal: Выбранная цель-исход.
+        facts: Снимок фактов мира.
+
+    Returns:
+        Доля закрытия разрыва ∈ [0, 1].
+    """
+    effect = option.effect
+    if effect is None or effect.fact.name != goal.fact.name:
+        return 0.0
+    current = evaluate_fact(goal.fact, facts)
+    gap_before = goal.value - current
+    if gap_before <= _GAIN_EPS:
+        return 0.0
+    gap_after = goal.value - effect.value
+    return min(1.0, max(0.0, (gap_before - gap_after) / gap_before))
+
+
+_GAIN_EPS = 1e-9
+
+
+def _option_value(
+    option: Option, context: OptionContext, preferences: ActuationPreferences
+) -> float:
+    """Итоговая скалярная ценность опции — единый расчёт скорера (этап 6).
+
+    Та же формула, что в ``select_option``: используется генератором, чтобы
+    ранжировать опции по единому скаляру, а не по отдельному правилу.
+    """
+    pragmatic, epistemic, _ = score_option(option, context, preferences)
+    penalty = 0.0 if option.reversible else preferences.irreversible_penalty
+    return (
+        preferences.pragmatic_weight * pragmatic
+        + preferences.epistemic_weight * epistemic
+        - preferences.cost_weight * option.cost
+        - penalty
     )
 
 
@@ -407,12 +531,44 @@ def _action_for(option: Option) -> Node:
     )
 
 
-def _find_option(goal: Goal, options: Sequence[Option]) -> Option | None:
-    """Первая по порядку окна опция, достигающая факта цели (тай-брейк)."""
-    for option in options:
-        if option.effect is not None and option.effect.fact.name == goal.fact.name:
-            return option
-    return None
+def _find_option(
+    goal: Goal,
+    options: Sequence[Option],
+    *,
+    context: OptionContext | None = None,
+    preferences: ActuationPreferences | None = None,
+) -> Option | None:
+    """Опция, достигающая факта цели (тай-брейк — порядок окна, этап 5/6).
+
+    При наличии ``context``/``preferences`` подходящие опции ранжируются по
+    **той же итоговой скалярной ценности**, что и ``select_option`` (единый
+    расчёт, а не отдельное правило); ``context.goal`` для подцели — сама
+    подцель. Без них — первая по порядку окна (прежнее поведение, тай-брейк —
+    окно).
+    """
+    matching = [
+        option
+        for option in options
+        if option.effect is not None and option.effect.fact.name == goal.fact.name
+    ]
+    if not matching:
+        return None
+    if context is None or preferences is None:
+        return matching[0]
+    subgoal_context = OptionContext(
+        uncertainty=context.uncertainty,
+        task=context.task,
+        mode=context.mode,
+        goal=goal,
+        facts=context.facts,
+    )
+    return max(
+        matching,
+        key=lambda option: (
+            _option_value(option, subgoal_context, preferences),
+            -options.index(option),
+        ),
+    )
 
 
 def backward_chain(
@@ -421,6 +577,8 @@ def backward_chain(
     state: Mapping[str, float],
     *,
     max_depth: int = 3,
+    context: OptionContext | None = None,
+    preferences: ActuationPreferences | None = None,
 ) -> Node:
     """Вывести дерево от цели обратным выводом (чистая, этап 5).
 
@@ -431,11 +589,19 @@ def backward_chain(
     горизонта дают ``Condition``-узел на цель — честный отказ, не фиктивное
     действие.
 
+    Этап 6 (аддитивно): при наличии ``context``/``preferences`` подходящие
+    опции ранжируются по единому скаляру ``select_option``; при рекурсивном
+    выборе для подцели ``effect_gain`` считается **относительно подцели**
+    (``_find_option`` подставляет ``Goal(subgoal)``). Без них поведение
+    прежнее (тай-брейк — порядок окна).
+
     Args:
         goal: Цель-исход (факт + целевое значение).
         options: Окно опций (порядок задаёт тай-брейк).
         state: Снимок фактов мира (что уже истинно).
         max_depth: Горизонт вложенности (>= 1), защита от chattering/цикла.
+        context: Контекст оценки (для ранжирования); None → прежнее поведение.
+        preferences: Веса скорера; None → прежнее поведение.
 
     Returns:
         Корень выведенного дерева.
@@ -449,7 +615,9 @@ def backward_chain(
     def derive(current: Goal, depth: int) -> Node:
         if guard_holds(Guard(current.fact, current.value), state):
             return _goal_condition(current)
-        option = _find_option(current, options)
+        option = _find_option(
+            current, options, context=context, preferences=preferences
+        )
         if option is None or depth >= max_depth:
             return _goal_condition(current)
         effect = option.effect

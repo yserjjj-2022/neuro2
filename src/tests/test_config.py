@@ -12,12 +12,15 @@ from src.config import (
     AutonomyConfig,
     ColumnParams,
     EnergyConfig,
+    GoalConfig,
     HomeostasisConfig,
     HostConfig,
     MemoryConfig,
+    OptionDeclaration,
     SocialConfig,
     SpeechConfig,
 )
+from src.core.actuation import Effect, Fact, PreferredOutcome
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
 from src.core.energy import FreeEnergyCalculator
@@ -299,3 +302,70 @@ class TestActuationConfig:
     def test_frozen(self) -> None:
         with pytest.raises(dataclasses.FrozenInstanceError):
             ActuationConfig().enabled = True  # type: ignore[misc]
+
+
+class TestGoalConfig:
+    """GoalConfig: дефолты и валидация (S8 проход 2)."""
+
+    def test_defaults(self) -> None:
+        cfg = GoalConfig()
+        assert cfg.enabled is False
+        assert cfg.outcomes == ()
+        assert cfg.max_attempts == 3
+        assert cfg.deadline_ticks == 8
+        assert cfg.cooldown_ticks == 1
+
+    def test_host_config_has_goal(self) -> None:
+        assert HostConfig().goal.enabled is False
+        assert HostConfig().option_declarations == ()
+
+    def test_bad_max_attempts_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_attempts"):
+            GoalConfig(max_attempts=0)
+
+    def test_negative_ticks_raise(self) -> None:
+        with pytest.raises(ValueError, match="deadline_ticks"):
+            GoalConfig(deadline_ticks=-1)
+        with pytest.raises(ValueError, match="cooldown_ticks"):
+            GoalConfig(cooldown_ticks=-1)
+
+    def test_frozen(self) -> None:
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            GoalConfig().enabled = True  # type: ignore[misc]
+
+
+class TestOptionDeclaration:
+    """OptionDeclaration: валидация (S8 проход 2)."""
+
+    def test_effect_only(self) -> None:
+        decl = OptionDeclaration("tool:x", effect=Effect(Fact("x"), value=1.0))
+        assert decl.option_id == "tool:x"
+        assert decl.guard is None
+
+    def test_guard_only(self) -> None:
+        from src.core.actuation import Guard
+
+        decl = OptionDeclaration("tool:x", guard=Guard(Fact("net"), threshold=1.0))
+        assert decl.effect is None
+
+    def test_empty_id_raises(self) -> None:
+        with pytest.raises(ValueError, match="option_id"):
+            OptionDeclaration("", effect=Effect(Fact("x")))
+
+    def test_requires_effect_or_guard(self) -> None:
+        with pytest.raises(ValueError, match="needs effect or guard"):
+            OptionDeclaration("tool:x")
+
+    def test_duplicate_ids_rejected_by_host(self) -> None:
+        decl = OptionDeclaration("tool:x", effect=Effect(Fact("x")))
+        with pytest.raises(ValueError, match="duplicate option_declarations"):
+            HostConfig(option_declarations=(decl, decl))
+
+
+class TestGoalOutcomes:
+    """Исходы в GoalConfig согласованы с Core-типом."""
+
+    def test_outcomes_roundtrip(self) -> None:
+        outcome = PreferredOutcome(Fact("a"), target=1.0, priority=2.0)
+        cfg = GoalConfig(enabled=True, outcomes=(outcome,))
+        assert cfg.outcomes[0] is outcome

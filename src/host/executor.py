@@ -127,7 +127,7 @@ class ActuatorExecutor:
         """
         return dict(self._statuses)
 
-    def _reset(self, root: Node) -> int:
+    def _reset(self, root: Node | None) -> int:
         """Сбросить состояние при смене дерева (преемпция, fail-safe).
 
         Returns:
@@ -145,6 +145,17 @@ class ActuatorExecutor:
         self._target_goal = None
         self._elapsed = 0
         return preemptions
+
+    def reset(self) -> int:
+        """Сбросить состояние, чтобы следующее дерево переигралось (S8 проход 2).
+
+        Нужно для **повторной попытки** одной и той же цели: без сброса
+        структурно равное дерево осталось бы ``done`` и не перезапустило листья.
+
+        Returns:
+            Сколько бегущих шагов прервано сбросом.
+        """
+        return self._reset(None)
 
     def _poll_effectors(self) -> list[ActuationResult]:
         """Опросить эффекторы; вернуть завершившиеся в этом тике (ADR-0012 §7)."""

@@ -39,24 +39,24 @@
 
 ```python
 class OptionSource(Enum):
-    TOOL = "tool"        # MCP-тул (эпистемическое зондирование)
+    TOOL = "tool"  # MCP-тул (эпистемическое зондирование)
     BUILTIN = "builtin"  # встроенное действие (этап 2+, сейчас не наполняется)
 
 
 @dataclass(frozen=True)
 class Option:
-    id: str                       # id в окне (неймспейс): "tool:get_weather"
+    id: str  # id в окне (неймспейс): "tool:get_weather"
     source: OptionSource
-    target: str = ""              # реальное имя вызова (имя MCP-тула); "" → id
-    description: str = ""         # для привязки темы (этап 2) и трассы
-    reversible: bool = False      # консервативный дефолт (ADR-0012 §4)
-    cost: float = 0.0             # стоимость/латентность (оценка, не замер)
+    target: str = ""  # реальное имя вызова (имя MCP-тула); "" → id
+    description: str = ""  # для привязки темы (этап 2) и трассы
+    reversible: bool = False  # консервативный дефолт (ADR-0012 §4)
+    cost: float = 0.0  # стоимость/латентность (оценка, не замер)
     relevance: float | None = None  # привязка темы [0,1]; None → дефолт
 
 
 @dataclass(frozen=True)
 class OptionWindow:
-    options: tuple[Option, ...] = ()   # порядок стабилен (детерминизм)
+    options: tuple[Option, ...] = ()  # порядок стабилен (детерминизм)
 
     def find(self, option_id: str) -> Option | None: ...
     @property
@@ -67,7 +67,7 @@ class OptionWindow:
 
 @dataclass(frozen=True)
 class OptionContext:
-    uncertainty: float            # [0,1] метакогнитивная неопределённость
+    uncertainty: float  # [0,1] метакогнитивная неопределённость
     task: str = "none"
     mode: str = "free"
 
@@ -77,8 +77,8 @@ class ActuationPreferences:
     pragmatic_weight: float = 1.0
     epistemic_weight: float = 0.5
     cost_weight: float = 0.1
-    irreversible_penalty: float = 0.5   # занижение без consent (калибруется)
-    relevance_floor: float = 0.0        # ниже — привязка не учитывается
+    irreversible_penalty: float = 0.5  # занижение без consent (калибруется)
+    relevance_floor: float = 0.0  # ниже — привязка не учитывается
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,7 @@ class OptionCandidate:
 
 @dataclass(frozen=True)
 class OptionTrace:
-    chosen: Option | None         # None → окно пусто
+    chosen: Option | None  # None → окно пусто
     reason: str
     candidates: tuple[OptionCandidate, ...]  # ВСЕ рассмотренные (в т.ч. отклонённые)
 
@@ -104,9 +104,11 @@ def build_options(
     builtin: Sequence[Option] = (),
 ) -> OptionWindow: ...
 
+
 def score_option(
     option: Option, context: OptionContext, preferences: ActuationPreferences
 ) -> tuple[float, float, str]: ...
+
 
 def select_option(
     window: OptionWindow,
@@ -156,25 +158,25 @@ DEFAULT_FACT_VALUE = 0.0  # нейтральное значение неизве
 
 @dataclass(frozen=True)
 class Fact:
-    name: str                    # стабильное имя: "network_available"
+    name: str  # стабильное имя: "network_available"
     default: float = DEFAULT_FACT_VALUE  # значение, если факт не измерен
-    description: str = ""        # для трассы/аудита
+    description: str = ""  # для трассы/аудита
 
 
 @dataclass(frozen=True)
 class Guard:
     fact: Fact
-    threshold: float             # жёсткое: fact >= threshold → узел проходит
+    threshold: float  # жёсткое: fact >= threshold → узел проходит
 
 
 @dataclass(frozen=True)
 class Regularity:
     fact: Fact
-    weight: float = 1.0          # мягкое: вклад факта в стоимость, >= 0
+    weight: float = 1.0  # мягкое: вклад факта в стоимость, >= 0
 
 
 # Реестр имён фактов — единый источник (Core владеет именами, Shell измеряет).
-FACTS: Mapping[str, Fact] = {...}   # "network_available", "topic_bound", ...
+FACTS: Mapping[str, Fact] = {...}  # "network_available", "topic_bound", ...
 
 
 def evaluate_fact(fact: Fact, state: Mapping[str, float]) -> float: ...
@@ -218,7 +220,7 @@ gate/партнёра и отдаёт `Mapping[str, float]`); Core не тяне
 @dataclass(frozen=True)
 class Effect:
     fact: Fact
-    value: float = 1.0          # целевое значение факта ∈ [0, 1]
+    value: float = 1.0  # целевое значение факта ∈ [0, 1]
 
 
 class ActuationKind(Enum):
@@ -236,8 +238,8 @@ class ActuationStatus(Enum):
 @dataclass(frozen=True)
 class Actuation:
     kind: ActuationKind
-    goal: str                   # id опции/цели в окне ("tool:get_weather")
-    payload: str = ""           # текст речи ИЛИ имя тула (Option.target); аргументы — Shell
+    goal: str  # id опции/цели в окне ("tool:get_weather")
+    payload: str = ""  # текст речи ИЛИ имя тула (Option.target); аргументы — Shell
 
 
 @dataclass(frozen=True)
@@ -245,13 +247,13 @@ class ActuationResult:
     status: ActuationStatus
     data: tuple[float, ...] = ()  # данные-результат → в шину (Shell, этап 6)
     actuation: Actuation | None = None  # активация-источник (трасса/§7.10)
-    text: str | None = None             # текст реплики (для речи, §7.10)
+    text: str | None = None  # текст реплики (для речи, §7.10)
 
 
 @dataclass(frozen=True)
 class ToolAnnotations:
     read_only_hint: bool = False
-    destructive_hint: bool = True    # консервативный дефолт (ADR-0012 §4)
+    destructive_hint: bool = True  # консервативный дефолт (ADR-0012 §4)
     idempotent_hint: bool = False
     open_world_hint: bool = True
 
@@ -301,10 +303,10 @@ Core-тип, а `Affordance`/`select_affordance` не трогаются.
 
 ```python
 class NodeKind(Enum):
-    CONDITION = "condition"   # лист: проверка guard
-    ACTION = "action"         # лист: актуация (статус — из контекста)
-    SEQUENCE = "sequence"     # все дети по порядку
-    FALLBACK = "fallback"     # первый успешный (priority, преемпция)
+    CONDITION = "condition"  # лист: проверка guard
+    ACTION = "action"  # лист: актуация (статус — из контекста)
+    SEQUENCE = "sequence"  # все дети по порядку
+    FALLBACK = "fallback"  # первый успешный (priority, преемпция)
 
 
 class NodeStatus(Enum):
@@ -317,9 +319,9 @@ class NodeStatus(Enum):
 class Node:
     kind: NodeKind
     name: str = ""
-    guard: Guard | None = None          # для CONDITION
+    guard: Guard | None = None  # для CONDITION
     actuation: Actuation | None = None  # для ACTION
-    children: tuple[Node, ...] = ()     # для SEQUENCE/FALLBACK
+    children: tuple[Node, ...] = ()  # для SEQUENCE/FALLBACK
     regularities: tuple[Regularity, ...] = ()  # мягкий порядок детей
 
 
@@ -334,9 +336,8 @@ class TickMemory:
     running_path: tuple[int, ...] = ()  # путь до бегущего листа (выход tick)
 
 
-def tick(
-    node: Node, context: TickContext
-) -> tuple[NodeStatus, TickMemory]: ...
+def tick(node: Node, context: TickContext) -> tuple[NodeStatus, TickMemory]: ...
+
 
 def order_children(
     children: Sequence[Node], facts: Mapping[str, float]
@@ -378,7 +379,7 @@ def order_children(
 @dataclass(frozen=True)
 class Goal:
     fact: Fact
-    value: float = 1.0          # целевое значение факта ∈ [0, 1]
+    value: float = 1.0  # целевое значение факта ∈ [0, 1]
 
 
 def backward_chain(
@@ -413,6 +414,78 @@ def backward_chain(
   → одинаковое дерево. `max_depth < 1` → `ValueError`.
 - **Защита от цикла:** рекурсия ограничена `max_depth` (guard, ведущий к тому же
   факту, упирается в горизонт).
+
+## Этап 6. Целевой контур в runtime (S8, проход 2)
+
+ADR-0014 (цель из снимка фактов), ADR-0015 (pragmatic — доля закрытия разрыва).
+Целевой контур формирует **цель-исход** из предпочтительных исходов и снимка
+фактов, оценивает опции **относительно цели** и проверяет достижение новым
+наблюдением. Все функции — **чистые и тотальные** (Core); наблюдение и исполнение
+— Shell (`host/goal_director.py`). Цель **не** выводится из тега колонки
+(`active_specialization` — только трасса).
+
+```python
+@dataclass(frozen=True)
+class PreferredOutcome:
+    fact: Fact
+    target: float = 1.0  # желаемое значение факта ∈ [0, 1]
+    priority: float = 1.0  # порядок при нескольких неудовлетворённых, >= 0
+
+
+def unsatisfied_outcomes(
+    outcomes: Sequence[PreferredOutcome], facts: Mapping[str, float]
+) -> tuple[PreferredOutcome, ...]: ...
+
+
+def select_goal(
+    outcomes: Sequence[PreferredOutcome], facts: Mapping[str, float]
+) -> Goal | None: ...
+
+
+def goal_reached(goal: Goal, facts: Mapping[str, float]) -> bool: ...
+
+
+def effect_gain(option: Option, goal: Goal, facts: Mapping[str, float]) -> float: ...
+```
+
+`OptionContext` аддитивно получает `goal: Goal | None = None` и
+`facts: Mapping[str, float] = field(default_factory=dict)` (дефолты сохраняют
+совместимость с этапами 1–5). `score_option` возвращает
+`pragmatic = effect_gain(...)`, если `context.goal` задан, иначе `0.0`.
+`backward_chain` получает **keyword-only** `context=None`/`preferences=None`.
+
+### Правила (этап 6)
+
+- **`unsatisfied_outcomes`:** исходы, где `evaluate_fact(fact, facts) < target`;
+  сортировка по `priority` ↓, тай-брейк — порядок объявления. Пустой вход → `()`.
+- **`select_goal`:** первый неудовлетворённый → `Goal(fact, target)`; все
+  удовлетворены или пустой список → `None` (действия не запускаются).
+- **`goal_reached`:** `evaluate_fact(goal.fact, facts) >= goal.value`
+  (эквивалентно `guard_holds(Guard(goal.fact, goal.value), facts)`).
+- **`effect_gain` (форма `P`, ADR-0015):** `effect is None` или
+  `effect.fact.name != goal.fact.name` → `0.0` (чужой эффект).
+  `current = evaluate_fact(goal.fact, facts)`, `gap_before = goal.value − current`;
+  `gap_before <= ε` (цель уже достигнута) → `0.0`. Иначе
+  `P = clip((gap_before − gap_after) / gap_before, 0, 1)`,
+  где `gap_after = goal.value − effect.value`.
+- **`effect.value` — прогнозируемое итоговое значение факта ∈ [0, 1]**, не
+  приращение; применяется **напрямую** (без сложения с `current`). Одинаково в
+  скорере и в `backward_chain` (при оценке подцелей). Если эффектор отдаёт
+  приращение — Shell приводит к итоговому значению до передачи в Core.
+- **`score_option`:** `pragmatic = effect_gain(...)` при `context.goal`, иначе
+  `0.0` (аддитивность: без цели прежнее поведение).
+- **`backward_chain` (ранжирование):** при наличии `context`/`preferences`
+  подходящие опции сравниваются по **той же итоговой скалярной ценности**, что и
+  `select_option` (`pragmatic_weight·pragmatic + epistemic_weight·epistemic −
+  cost_weight·cost − irreversible_penalty`), а не «первая по окну». При
+  рекурсивном выборе для подцели `goal` для `effect_gain` — **сама подцель**
+  (`Goal(subgoal_fact, subgoal_value)`), `facts` — текущий снимок. Без
+  `context`/`preferences` — прежнее поведение (тай-брейк — окно).
+- **Граница оценки:** `P` — оценка прогресса для MVP, **не гарантия
+  оптимальности**; промежуточные шаги без прямого прогресса обеспечивает
+  `backward_chain` (подцели), а не `Guard`. Локальные ловушки MVP не устраняет.
+- **Неизвестные факты:** `evaluate_fact` деградирует к `fact.default`
+  (тотальность); безусловного «пустой снимок → 0» нет.
 
 ## Инварианты
 
@@ -455,6 +528,18 @@ def backward_chain(
     порядок окна опций; одинаковый вход → одинаковое дерево.
 19. **Безопасный отказ (этап 5):** недостижимая цель → `Condition`-узел на цель
     (провал честен), а не выдуманный `Action`.
+20. **Цель не из колонки (этап 6):** `selected_goal` формируется из исходов и
+    снимка фактов; `active_specialization` в оценку не входит.
+21. **Тотальность цели (этап 6):** пустые исходы / неизвестный факт → деградация
+    к дефолту, не падение; `select_goal` → `None` при достигнутых исходах.
+22. **Аддитивность скорера (этап 6):** без `context.goal` pragmatic = 0
+    (совместимость этапов 1–5); новые поля `OptionContext` — с дефолтами.
+23. **Единая семантика эффекта (этап 6):** `effect.value` — прогнозируемое
+    **итоговое** значение факта (не приращение); формула `P` — доля закрытия
+    разрыва; чужой эффект / отсутствие эффекта / `gap_before <= ε` → `0`.
+24. **Единый скаляр генератора (этап 6):** `backward_chain` при `context`/
+    `preferences` ранжирует опции по той же итоговой ценности, что и
+    `select_option`; при подцели `effect_gain` — относительно подцели.
 
 ## Критерии приёмки
 
@@ -508,6 +593,21 @@ def backward_chain(
 - [ ] ablation: убрать `effect` → цепочка схлопывается
 - [ ] `max_depth < 1` → `ValueError`
 
+**Этап 6:**
+- [x] `PreferredOutcome` — frozen, валидация `target ∈ [0, 1]`, `priority >= 0`
+- [x] `unsatisfied_outcomes` — фильтр `< target`, сортировка по `priority` ↓,
+      тай-брейк — порядок; пустой вход → `()`
+- [x] `select_goal` — первый неудовлетворённый → `Goal`; иначе `None`
+- [x] `goal_reached` — `evaluate_fact >= goal.value` (через `guard_holds`)
+- [x] `effect_gain` — доля закрытия разрыва `P`; чужой/нет эффекта / `gap_before
+      <= ε` → `0`; `effect.value` = итоговое значение (не приращение)
+- [x] `OptionContext.goal`/`.facts` — аддитивны, дефолты сохраняют совместимость
+- [x] `score_option` без цели → прежнее поведение (`pragmatic = 0`)
+- [x] `backward_chain` с `context`/`preferences` — ранжирование по единому
+      скаляру; подцель оценивается относительно себя; без них — прежнее поведение
+- [x] тотальность: неизвестный факт → `fact.default`, не падение
+- [x] детерминизм: одинаковый вход → одинаковый результат; pyright strict
+
 ## Границы (этапность)
 
 **Входит (этап 1):** окно, скорер, выбор, трасса — для тулов.
@@ -524,6 +624,10 @@ def backward_chain(
 
 **Входит (этап 5):** `Goal`, `backward_chain` (runtime-генератор дерева от цели,
 горизонт 2–3).
+
+**Входит (этап 6):** `PreferredOutcome`, `unsatisfied_outcomes`, `select_goal`,
+`goal_reached`, `effect_gain`, `OptionContext.goal`/`.facts`, pragmatic в
+`score_option`, ранжирование в `backward_chain` (целевой контур, ADR-0014/0015).
 
 **НЕ входит (расширят спеку перед кодом):**
 - **BT-декораторы и `Parallel`** — не вводим до реального кейса;

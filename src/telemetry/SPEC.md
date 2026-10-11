@@ -18,10 +18,13 @@ change_kind, consolidated_pruned) = 35.
 S6 (проход 2): +2 поля MCP-зондирования (probe_affordance, probe_success) = 37.
 S8: +5 полей секвенирования актуаций (actuation_status/goal/impatience/steps/
 preemptions) = 42.
+BACKLOG: +`channel_contrib` (CSV-вклады каналов шины в F) = 43.
+S8 (проход 2): +6 полей целевого контура (selected_goal/goal_reason/goal_attempt/
+goal_achieved/goal_call_status/active_specialization) = 49.
 
 ## Публичный интерфейс
 
-### TelemetryEvent (frozen dataclass, 42 полей)
+### TelemetryEvent (frozen dataclass, 49 полей)
 
 ```python
 @dataclass(frozen=True)
@@ -66,6 +69,13 @@ class TelemetryEvent:
     actuation_impatience: float  # сигнал нетерпения [0, 1] (S8)
     actuation_steps: int  # завершено шагов актуации на тике (S8)
     actuation_preemptions: int  # преемпций на тике (S8)
+    selected_goal: str  # выбранная цель-исход, "" если нет (S8 п2)
+    goal_reason: str  # причина выбора/невыбора цели (S8 п2)
+    goal_attempt: int  # число попыток текущей цели (S8 п2)
+    goal_achieved: bool  # достигнута ли цель по наблюдению (S8 п2)
+    goal_call_status: str  # статус последнего шага (running/success/failure)
+    active_specialization: str  # тег активной специализации колонки (трасса)
+    channel_contrib: str  # CSV-вклады каналов шины в F (BACKLOG)
     phase: str
     mode: str
 ```
@@ -135,6 +145,13 @@ def log(
     actuation_impatience=0.0,
     actuation_steps=0,
     actuation_preemptions=0,
+    selected_goal="",
+    goal_reason="",
+    goal_attempt=0,
+    goal_achieved=False,
+    goal_call_status="",
+    active_specialization="",
+    channel_contrib="",
 ) -> None: ...
 ```
 
@@ -150,7 +167,7 @@ def log(
 
 ## Критерии приёмки (S1–S6)
 
-- [x] `TelemetryEvent` — 35 полей, все типизированы
+- [x] `TelemetryEvent` — 49 полей, все типизированы
 - [x] `serialize_event` — чистая, NaN → ValueError
 - [x] новые поля в JSON (проверено тестом)
 - [x] обратная совместимость `log()` (дефолты)

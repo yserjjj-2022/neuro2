@@ -56,6 +56,12 @@ class TelemetryEvent:
         actuation_impatience: Сигнал нетерпения [0, 1] — S8.
         actuation_steps: Завершено шагов актуации на тике — S8.
         actuation_preemptions: Преемпций (смен целей) на тике — S8.
+        selected_goal: Выбранная цель-исход ("" если нет цели) — S8 проход 2.
+        goal_reason: Причина выбора/невыбора цели — S8 проход 2.
+        goal_attempt: Число попыток текущей цели — S8 проход 2.
+        goal_achieved: Достигнута ли цель по наблюдению — S8 проход 2.
+        goal_call_status: Статус последнего шага (running/success/failure).
+        active_specialization: Тег активной специализации колонки (трасса) — S8 п2.
         channel_contrib: CSV-вклады каналов шины в F (tag:вклад) — BACKLOG.
         phase: Фаза проекта (из config).
         mode: Режим (game/cooperative/free).
@@ -101,6 +107,12 @@ class TelemetryEvent:
     actuation_impatience: float
     actuation_steps: int
     actuation_preemptions: int
+    selected_goal: str
+    goal_reason: str
+    goal_attempt: int
+    goal_achieved: bool
+    goal_call_status: str
+    active_specialization: str
     channel_contrib: str
     phase: str
     mode: str

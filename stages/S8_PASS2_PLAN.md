@@ -58,15 +58,20 @@ Core (чистые функции + тесты), затем Config, затем S
 
 ## Порядок работ
 
-### Шаг 0. ADR-0014 + обновление модульных SPEC
+### Шаг 0. ADR-0014 + ADR-0015 + обновление модульных SPEC
 
-1. ADR-0014 (append-only): цель из исходов+фактов (не из колонки); pragmatic —
-   доля закрытия разрыва `P`; два вида успеха; одно действие в полёте;
-   сосуществование S6/S8; именование `active_specialization`/`selected_goal`;
-   разделение `GoalConfig` (цели/приоритеты) и `OptionDeclaration` (семантика
-   опции по устойчивому ID).
-2. Обновить `src/core/actuation/SPEC.md` (Core-типы/функции) и `src/host/SPEC.md`
-   (GoalDirector/wiring) до кода.
+1. ADR-0014: цель из исходов+фактов (не из колонки); `PreferredOutcome` →
+   `Goal`; `select_option`/`backward_chain` как селектор (не `select_affordance`);
+   два вида успеха; одно действие в полёте; сосуществование S6/S8; именование
+   `active_specialization`/`selected_goal`; разделение `GoalConfig`
+   (цели/приоритеты) и `OptionDeclaration` (семантика опции по устойчивому ID).
+2. ADR-0015: pragmatic — доля закрытия разрыва `P`; `effect.value` —
+   прогнозируемое **итоговое** значение факта (не приращение); единый скаляр
+   ранжирования генератора; подцель оценивается относительно себя; неизвестный
+   факт → `fact.default` (без «пустой снимок → 0»).
+3. Обновить `src/core/actuation/SPEC.md` (этап 6: Core-типы/функции),
+   `src/host/SPEC.md` (GoalDirector/wiring) и `src/config/SPEC.md`
+   (`GoalConfig`/`OptionDeclaration`) до кода.
 
 ### Шаг 1. Core: цель и прагматика
 
@@ -159,3 +164,10 @@ Core (чистые функции + тесты), затем Config, затем S
 ## Статус
 
 План зафиксирован (обсуждение 2026-10-11). Код — после утверждения SPEC/PLAN.
+
+**Реализовано** (2026-10-11): Шаги 0–4. Core (`PreferredOutcome`, `select_goal`,
+`unsatisfied_outcomes`, `goal_reached`, `effect_gain`, pragmatic в `score_option`,
+ранжирование `backward_chain`); Config (`GoalConfig`, `OptionDeclaration`);
+Shell (`host/goal_director.py`, wiring в `HostLoop`, `explore()` подавляется);
+стенд A/B + сквозные тесты §13 + контроль F; телеметрия (6 полей). Гейт:
+`ruff check`/`format`, `pyright` (новые файлы — 0 ошибок), `pytest` 1412 passed.

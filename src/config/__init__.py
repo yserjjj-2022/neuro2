@@ -12,6 +12,8 @@ Re-exports:
     SocialConfig — theory-of-mind parameters (S5)
     AutonomyConfig — selfcontrol/consolidation/drive/factors parameters (S6)
     ActuationConfig — actuation sequencing parameters (S8)
+    GoalConfig — goal-loop outcomes/priorities (S8 pass 2)
+    OptionDeclaration — option effect/guard semantics by stable ID (S8 pass 2)
     load_preset / available_presets — named deterministic presets (S7)
 """
 
@@ -21,9 +23,11 @@ from .params import (
     AutonomyConfig,
     ColumnParams,
     EnergyConfig,
+    GoalConfig,
     HomeostasisConfig,
     HostConfig,
     MemoryConfig,
+    OptionDeclaration,
     PolicyConfig,
     SocialConfig,
     SpeechConfig,
@@ -36,9 +40,11 @@ __all__ = [
     "AutonomyConfig",
     "ColumnParams",
     "EnergyConfig",
+    "GoalConfig",
     "HomeostasisConfig",
     "HostConfig",
     "MemoryConfig",
+    "OptionDeclaration",
     "PolicyConfig",
     "SocialConfig",
     "SpeechConfig",

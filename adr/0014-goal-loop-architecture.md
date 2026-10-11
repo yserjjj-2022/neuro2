@@ -1,4 +1,4 @@
-# ADR-0014: Целевой цикл — `selected_goal`, явные исходы, выбор цели из наблюдаемого состояния
+# ADR-0014: Целевой контур — цель из снимка фактов, `select_goal` по приоритету
 
 ## Status
 Accepted
@@ -9,80 +9,115 @@ Accepted
 ## Context
 
 Целевой цикл (goal loop) — отсутствующая часть архитектуры: `affordance`-скоринг
-(ADR-0012) оценивает, что можно сделать; локальный мир (ADR-0013) наблюдает,
-что есть. Между ними нет связки, которая **наблюдает состояние, определяет
-неудовлетворённый исход, выбирает цель, исполняет и проверяет результат новым
-наблюдением**.
+(ADR-0012) оценивает, что можно сделать; проекции колонок (ADR-0013) обеспечивают
+различную обработку сегментов шины. Между ними нет связки, которая **формирует
+цель из наблюдаемого состояния, выбирает опцию/цепочку, исполняет и проверяет
+результат**.
 
-Существующий S6-fallback (`select_affordance` в `host/loop.py`) не меняются в
-этом разрезе. Целевой цикл подключается отдельно (ADR-0012 §4).
+Существующий S6-fallback (`select_affordance` в `host/loop.py`) не меняется
+в этом разрезе — целевой контур подключается отдельным маршрутом.
 
 ## Decision
 
-### 1. Разделение `GoalSpec` и `OutcomeSpec`
+### 1. Простая модель цели: `PreferredOutcome` + `Goal`
 
-`GoalSpec` не содержит `predicate_id` напрямую — он ссылается на `OutcomeSpec`
-через `outcome_id`. `OutcomeSpec` ссылается на предикат через `predicate_id`.
-Это позволяет нескольким целям разделять один критерий проверки и менять
-критерий без изменения цели.
+Цель формируется из **предпочтительных исходов** и **снимка фактов**
+`Mapping[str, float]` (не из тега победившей колонки, не из `relevance`
+аффордансов).
 
-### 2. `selected_goal` — явное поле
+```python
+@dataclass(frozen=True)
+class PreferredOutcome:
+    fact: Fact
+    target: float = 1.0     # желаемое значение факта ∈ [0, 1]
+    priority: float = 1.0   # порядок при нескольких неудовлетворённых, >= 0
 
-`selected_goal` — результат функции `select_goal()`, не побочный результат
-скоринга. Функция имеет явный контракт: принимает `GoalSpec` + `OutcomeObservation`,
-возвращает один `GoalSpec` (по приоритету) или `None`.
+def select_goal(
+    outcomes: Sequence[PreferredOutcome], facts: Mapping[str, float]
+) -> Goal | None:
+    """Первый неудовлетворённый по приоритету ↓ → Goal(fact, target);
+    None — все исходы достигнуты или outcomes пуст.
+    Тай-брейк — порядок объявления в outcomes."""
+```
 
-### 3. Целевой цикл не меняет `select_affordance`
+`Goal` — простой тип `Fact` + целевое значение (`value ∈ [0, 1]`). Не вводим
+дополнительные слои `GoalSpec`/`OutcomeSpec`/`predicate_id` — они могут быть
+полезны позже, но сейчас добавляют ненужный перевод между фактом и целью.
 
-Целевой цикл — отдельная функция `run_goal_cycle()`, которая вызывает
-`select_goal()`, затем `select_affordance()`, затем возврат результата.
-`select_affordance` (ADR-0012) не изменяется: цели не добавляются в его
-сигнатуру.
+### 2. `selected_goal` — результат `select_goal()`, не побочный эффект скоринга
 
-### 4. Наблюдаемые исходы: `OutcomeObservation`
+`select_goal()` принимает `PreferredOutcome` + снимок фактов, возвращает один
+`Goal` (по приоритету) или `None`. Диапазон `priority >= 0`; тай-брейк при равных
+приоритетах — **порядок объявления** в `outcomes`. Обе величины зафиксированы так
+же, как в `stages/S8_PASS2_SPEC.md` §4.
 
-Строится из `Observation` (ADR-0013) через реестр предикатов:
-`predicate_id → FactObservation → grade`. Не через `relevance` аффордансов.
+### 3. Выбор действия: `select_option` / `backward_chain` → исполнитель
+
+Целевой контур **не использует** `select_affordance` (S6) как селектор.
+Селектор целевого контура — `select_option()` + `backward_chain()` (ADR-0012
+§5–§6) → `tick_actuation` → эффекторы.
+
+S6-маршрут (`select_affordance` в `host/loop.py`) остаётся отдельным,
+неизменённым. Целевой контур подключается параллельно.
+
+### 4. Снимок фактов — `Mapping[str, float]`, не `Observation` + реестр предикатов
+
+Целевой контур работает с **снимком фактов** `Mapping[str, float]`, который
+Shell собирает через `Environment.observe()`. Core-функция `evaluate_fact(fact,
+state)` извлекает значение по имени факта с дефолтом (`fact.default`), не
+требует реестра предикатов.
+
+Ссылка на ADR-0013: это решение о **проекции колонок через именованные reads
+сегментов** (различная обработка сегментов шины), а не о «локальном мире».
+Снимок фактов для целевого контура — общий механизм Shell, не часть ADR-0013.
 
 ### 5. Итерация целевого цикла
 
 ```
-1. observe        → Observation (ADR-0013)
-2. observe_outcome → OutcomeObservation (из Observation + реестр предикатов)
-3. select_goal    → GoalSpec | None
-4. select_affordance (для выбранной цели) → ScoredCandidate | None
-5. (action выполняется вне Core — Shell/Host)
-6. observe again  → повторный шаг 1 (после действия)
-7. outcome_check  → OutcomeObservation (удовлетворён ли исход)
+1. observe        → Mapping[str, float] (снимок фактов)
+2. unsatisfied_outcomes → tuple[PreferredOutcome, ...]
+3. select_goal    → Goal | None
+4. build_options + OptionDeclaration → OptionWindow + декларации
+5. score_option + select_option + backward_chain(goal, options, facts, context) → Node
+6. tick_actuation (Shell: Gate → Effector)
+7. re-observe → снимок фактов → goal_reached(goal, new_facts)
 ```
 
-Шаги 5–6 выполняются вне Core. `run_goal_cycle` — чистая функция, вызываемая
-Host.
+Шаги 1, 6–7 — Shell. Шаги 2–5 — Core (чистые функции).
 
 ### 6. Разделение ролей: Core / Host / Shell
 
 | Роль | Ответственность |
 |---|---|
-| Core | `select_goal`, `observe_outcome`, `run_goal_cycle` (чистые функции) |
-| Host | вызов `run_goal_cycle`, повторное наблюдение, лимиты, таймауты |
-| Shell | выбор `GoalSpec`/`OutcomeSpec` (конфигурация), авторизация |
+| Core | `unsatisfied_outcomes`, `select_goal`, `goal_reached`, `effect_gain`,
+  `score_option`, `select_option`, `backward_chain` (чистые функции) |
+| Host | `GoalDirector.tick()`, повторное наблюдение, лимиты, таймауты,
+  преемпция |
+| Shell | `Environment.observe()`, `build_options`, `CapabilityGate`,
+  `ActuatorExecutor`, `GoalConfig`/`OptionDeclaration` (конфигурация) |
 
 Core не хранит состояние между итерациями.
 
-### 7. Реестр предикатов
+### 7. Валидация деклараций при сборке
 
-`predicate_id` в `OutcomeSpec` — строка, разрешаемая через реестр (registry
-pattern, ADR-0013 §3.4). Не замыкание, не словарь в модуле.
+`HostConfig.option_declarations` — `tuple[OptionDeclaration, ...]` по устойчивому
+`option_id` (`tool:<name>`). `build_host_loop` валидирует: каждый `option_id`
+разрешается в существующую опцию окна; `effect.fact`/`guard.fact` присутствуют в
+объявленной схеме состояния (не каждый факт обязан быть конечной целью —
+вспомогательные и промежуточные допустимы для многошаговых цепочек); дубликаты
+запрещены. Несогласованность → `ValueError` (fail-fast).
 
 ## Связанные ADR
 
-- **ADR-0012:** окно аффордансов, скорер (`select_affordance` остаётся без
-  изменений в этом разрезе).
-- **ADR-0013:** локальный мир, `Observation`, предикаты.
-- **ADR-0015:** форма pragmatic для целей (раздел 3).
+- **ADR-0012:** окно аффордансов, скорер, BT, генератор (`select_option`/
+  `backward_chain` — целевой селектор).
+- **ADR-0013:** проекции колонок через именованные reads сегментов (ссылка
+  исправлена: это не «локальный мир/предикаты»).
+- **ADR-0015:** форма pragmatic для целей (доля закрытия разрыва).
 
 ## Что не входит
 
-- Реализация `pragmatic` (ADR-0015 §3).
+- `GoalSpec`/`OutcomeSpec`/реестр предикатов — могут быть введены позже
+  отдельно.
 - Подключение к `host/loop.py` — отдельный шаг.
 - Обучение приоритетов.

@@ -28,7 +28,12 @@ from pathlib import Path
 
 import numpy as np
 
-from src.config import ActuationConfig, AutonomyConfig, HostConfig, PolicyConfig
+from src.config import (
+    ActuationConfig,
+    AutonomyConfig,
+    HostConfig,
+    PolicyConfig,
+)
 from src.core.actuation import Actuation, ActuationKind, Node
 from src.core.cmc import apply_attention, attention_gate
 from src.core.energy import DriftDetector, PrecisionEstimator, check_finite
@@ -42,6 +47,7 @@ from src.host.gate import (
     CapabilityGate,
     CapabilityTier,
 )
+from src.host.goal_director import Environment, GoalDirector
 from src.host.probe import ProbeEffector, ProbeFn
 from src.host.resources import ResourceMeter, ResourceProvider
 from src.host.sources import (
@@ -130,6 +136,7 @@ class HostLoop:
     probe_effector: ProbeEffector | None = None
     actuation_config: ActuationConfig | None = None
     executor: ActuatorExecutor | None = None
+    goal_director: GoalDirector | None = None
     importance: np.ndarray | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
@@ -175,6 +182,12 @@ class HostLoop:
     _actuation_impatience_pending: float = field(default=0.0, init=False, repr=False)
     _actuation_steps_pending: int = field(default=0, init=False, repr=False)
     _actuation_preemptions_pending: int = field(default=0, init=False, repr=False)
+    _goal_selected_last: str = field(default="", init=False, repr=False)
+    _goal_reason_last: str = field(default="", init=False, repr=False)
+    _goal_attempt_last: int = field(default=0, init=False, repr=False)
+    _goal_achieved_last: bool = field(default=False, init=False, repr=False)
+    _goal_call_status_last: str = field(default="", init=False, repr=False)
+    _active_specialization_last: str = field(default="", init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tick_dt <= 0.0:
@@ -444,6 +457,21 @@ class HostLoop:
         # Вне аффективного контура: не влияет на F этого тика (инвариант 6).
         self._maybe_consolidate(tick, now)
 
+        # Целевой контур (S8 проход 2): наблюдение → цель → цепочка →
+        # исполнение → проверка. Вне аффективного контура: не влияет на F этого
+        # тика (как policy/consolidation). `goal_director=None` → no-op
+        # (совместимость: контур S7/S8 прохода 1 идентичен).
+        if self.goal_director is not None:
+            attempt = self.goal_director.tick(tick)
+            self._goal_selected_last = (
+                attempt.goal.fact.name if attempt.goal is not None else ""
+            )
+            self._goal_reason_last = attempt.reason
+            self._goal_attempt_last = attempt.attempts
+            self._goal_achieved_last = attempt.achieved
+            self._goal_call_status_last = attempt.call_status
+            self._active_specialization_last = self.active_task()
+
         self.logger.log(
             free_energy=outcome.result.f,
             valence=outcome.result.valence,
@@ -484,6 +512,12 @@ class HostLoop:
             actuation_impatience=self._actuation_impatience_pending,
             actuation_steps=self._actuation_steps_pending,
             actuation_preemptions=self._actuation_preemptions_pending,
+            selected_goal=self._goal_selected_last,
+            goal_reason=self._goal_reason_last,
+            goal_attempt=self._goal_attempt_last,
+            goal_achieved=self._goal_achieved_last,
+            goal_call_status=self._goal_call_status_last,
+            active_specialization=self._active_specialization_last,
             channel_contrib=",".join(
                 f"{tag}:{value:.4f}" for tag, value in outcome.channel_contrib
             ),
@@ -725,6 +759,11 @@ class HostLoop:
         """
         if self.probe_effector is None:
             return None
+        # Сосуществование S6/S8 (S8 проход 2, §8): при активном целевом контуре
+        # зондирование подавляется, пока есть цель или действие в полёте — иначе
+        # два маршрута дерутся за один эффектор.
+        if self.goal_director is not None and self.goal_director.active:
+            return None
         uncertainty = (
             self.selfcontrol.metacognition.epistemic_uncertainty
             if self.selfcontrol is not None
@@ -813,6 +852,23 @@ class HostLoop:
             self._actuation_preemptions_pending,
         )
 
+    @property
+    def last_goal_telemetry(self) -> tuple[str, str, int, bool, str, str]:
+        """Поля телеметрии целевого контура последнего тика (S8 проход 2).
+
+        Returns:
+            (selected_goal, goal_reason, goal_attempt, goal_achieved,
+            goal_call_status, active_specialization).
+        """
+        return (
+            self._goal_selected_last,
+            self._goal_reason_last,
+            self._goal_attempt_last,
+            self._goal_achieved_last,
+            self._goal_call_status_last,
+            self._active_specialization_last,
+        )
+
     def attach_speech(self, speak: Callable[[Actuation], str | None]) -> None:
         """Подключить речевой эффектор к секвенированию (S8, Shell).
 
@@ -869,6 +925,7 @@ def build_host_loop(
     integrations: IntegrationRegistry | None = None,
     probe_fn: ProbeFn | None = None,
     affordances: AffordanceMap | None = None,
+    environment: Environment | None = None,
 ) -> HostLoop:
     """Собрать host loop: провайдеры → шина → колонки → конвейер → телеметрия.
 
@@ -1070,7 +1127,20 @@ def build_host_loop(
             expected_ticks=config.actuation.expected_ticks,
         )
 
-    return HostLoop(
+    # Целевой контур (S8 проход 2): директор собирается при `goal.enabled`,
+    # доступном executor'е и явной среде (`environment`). Дефолт
+    # `goal.enabled=False` → контур S7/S8 прохода 1 идентичен. Среда обязательна
+    # (снимок фактов мира измеряет приложение, не Core): `goal.enabled` без неё —
+    # fail-fast, а не молчаливая деградация.
+    if config.goal.enabled:
+        if executor is None:
+            raise ValueError(
+                "goal.enabled requires actuation.enabled (executor is absent)"
+            )
+        if environment is None:
+            raise ValueError("goal.enabled requires an environment (fact snapshot)")
+
+    loop = HostLoop(
         bus=bus,
         pipeline=pipeline,
         logger=logger,
@@ -1107,3 +1177,18 @@ def build_host_loop(
         actuation_config=config.actuation,
         executor=executor,
     )
+
+    if config.goal.enabled and environment is not None:
+        loop.goal_director = GoalDirector(
+            loop=loop,
+            outcomes=config.goal.outcomes,
+            declarations=config.option_declarations,
+            environment=environment,
+            preferences=config.actuation.preferences,
+            max_attempts=config.goal.max_attempts,
+            deadline_ticks=config.goal.deadline_ticks,
+            cooldown_ticks=config.goal.cooldown_ticks,
+            max_depth=config.actuation.max_depth,
+        )
+
+    return loop

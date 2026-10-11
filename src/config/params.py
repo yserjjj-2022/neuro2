@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.core.actuation import ActuationPreferences
+from src.core.actuation import ActuationPreferences, Effect, Guard, PreferredOutcome
 from src.core.attractors import TaskAttractor
 from src.core.cmc import ColumnConfig
 from src.core.energy import FreeEnergyCalculator
@@ -463,6 +463,73 @@ class ActuationConfig:
 
 
 @dataclass(frozen=True)
+class GoalConfig:
+    """Параметры целевого контура в runtime (S8, проход 2).
+
+    Ответственность **разделена** (ADR-0014): здесь — цели и приоритеты («что
+    считаем желательным»); семантика опций (``effect``/``guard``) — в отдельной
+    ``OptionDeclaration`` по устойчивому ID инструмента.
+
+    Attributes:
+        enabled: Включать ли целевой контур. False → S8-совместимость.
+        outcomes: Предпочтительные исходы (цель формируется из них и фактов).
+        max_attempts: Ограничение повторов попытки (>= 1).
+        deadline_ticks: Тайм-аут цепочки → преемпция → FAILURE.
+        cooldown_ticks: Пауза между попытками (анти-дребезг).
+    """
+
+    enabled: bool = False
+    outcomes: tuple[PreferredOutcome, ...] = ()
+    max_attempts: int = 3
+    deadline_ticks: int = 8
+    cooldown_ticks: int = 1
+
+    def __post_init__(self) -> None:
+        """Валидация: max_attempts >= 1, неотрицательные тики.
+
+        Raises:
+            ValueError: Если max_attempts < 1 или тики отрицательны.
+        """
+        if self.max_attempts < 1:
+            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+        if self.deadline_ticks < 0:
+            raise ValueError(f"deadline_ticks must be >= 0, got {self.deadline_ticks}")
+        if self.cooldown_ticks < 0:
+            raise ValueError(f"cooldown_ticks must be >= 0, got {self.cooldown_ticks}")
+
+
+@dataclass(frozen=True)
+class OptionDeclaration:
+    """Объявленная семантика опции (закономерность среды, не политика).
+
+    Привязана к **устойчивому ID** инструмента (``Option.id``, неймспейс
+    ``tool:<name>``), а не к позиции в окне: окно пересобирается, а ID стабилен.
+
+    Attributes:
+        option_id: Устойчивый ID опции (непустой).
+        effect: Символьный эффект (``fact := value``); None → нет эффекта.
+        guard: Жёсткий кондишен-предпосылка; None → без предпосылки.
+    """
+
+    option_id: str
+    effect: Effect | None = None
+    guard: Guard | None = None
+
+    def __post_init__(self) -> None:
+        """Валидация: непустой option_id, хотя бы одно из effect/guard.
+
+        Raises:
+            ValueError: Если option_id пуст или оба поля None.
+        """
+        if not self.option_id:
+            raise ValueError("option_id must not be empty")
+        if self.effect is None and self.guard is None:
+            raise ValueError(
+                f"option declaration {self.option_id!r} needs effect or guard"
+            )
+
+
+@dataclass(frozen=True)
 class HostConfig:
     """Полная конфигурация host loop.
 
@@ -495,6 +562,9 @@ class HostConfig:
         social: Параметры социального контура (S5).
         autonomy: Параметры автономии (S6).
         actuation: Параметры секвенирования актуаций (S8).
+        goal: Параметры целевого контура (S8, проход 2).
+        option_declarations: Семантика опций (effect/guard) по устойчивому ID
+            (S8, проход 2).
         channel_ranks: Важность каналов шины (``rank₀``, tag → вес > 0).
             Пусто → все каналы равноважны (1.0). Временное место до переезда
             сборки шины на реестр интеграций (BACKLOG).
@@ -533,6 +603,8 @@ class HostConfig:
     social: SocialConfig = field(default_factory=SocialConfig)
     autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
     actuation: ActuationConfig = field(default_factory=ActuationConfig)
+    goal: GoalConfig = field(default_factory=GoalConfig)
+    option_declarations: tuple[OptionDeclaration, ...] = ()
     channel_ranks: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
@@ -579,3 +651,10 @@ class HostConfig:
                 raise ValueError(
                     f"channel_ranks rank must be > 0 for {tag!r}, got {rank}"
                 )
+        seen_options: set[str] = set()
+        for declaration in self.option_declarations:
+            if declaration.option_id in seen_options:
+                raise ValueError(
+                    f"duplicate option_declarations id: {declaration.option_id!r}"
+                )
+            seen_options.add(declaration.option_id)

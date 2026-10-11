@@ -15,6 +15,8 @@ Host-слой: сенсорная шина, per-tick конвейер и host lo
 - `control.py` — `ControlChannel` (status/pause/resume/step, S4).
 - `effectors.py` — `Effector` Protocol + адаптеры (S8 этап 6).
 - `executor.py` — `ActuatorExecutor` (tick BT над эффекторами, S8 этап 6).
+- `goal_director.py` — `GoalDirector` + `Environment`/`GoalAttempt` (целевой
+  контур в runtime, S8 проход 2; ADR-0014/0015).
 - `loop.py` — `HostLoop`: время, precision, гомеостаз, throttle, attention,
   ресурсы, guard, drift, policy-контекст, телеметрия.
 
@@ -160,8 +162,9 @@ class CMCPipeline:
     observer: EnergyObserver
     active_threshold: float = 1e-8
 
-    def tick(self, u, precision, dt, segments=(), reflex_tags=(),
-             importance=None) -> TickOutcome: ...
+    def tick(
+        self, u, precision, dt, segments=(), reflex_tags=(), importance=None
+    ) -> TickOutcome: ...
 ```
 
 ## ResourceMeter / ResourceProvider (resources.py)
@@ -194,11 +197,11 @@ class ResourceProvider:
 @dataclass
 class HostLoop:
     bus, pipeline, logger, estimator, meter, drift
-    homeostat: Homeostat | None = None          # S4
-    throttle_k_scale: float = 0.5               # S4
-    throttle_dt_scale: float = 2.0              # S4
-    escape_hatch_ticks: int = 3                 # S4-долг
-    policy_config: PolicyConfig | None = None   # S4
+    homeostat: Homeostat | None = None  # S4
+    throttle_k_scale: float = 0.5  # S4
+    throttle_dt_scale: float = 2.0  # S4
+    escape_hatch_ticks: int = 3  # S4-долг
+    policy_config: PolicyConfig | None = None  # S4
     tick_dt: float = 0.01
     clock_mode: str = "synthetic"
     paced: bool = False
@@ -210,19 +213,25 @@ class HostLoop:
     def run(self, max_ticks) -> int: ...
     def close(self) -> None: ...
     # S4/S5/S6:
-    def policy_context(self, *, has_new_message, mode="free",
-                       partner=None) -> PolicyContext: ...
+    def policy_context(
+        self, *, has_new_message, mode="free", partner=None
+    ) -> PolicyContext: ...
     def active_task(self) -> str: ...
     def record_policy(self, trace: PolicyTrace) -> None: ...
-    def record_social(self, *, trust=0.0, uncertainty=0.0, name="",
-                      pause_s=0.0, claim_conflict=0.0) -> None: ...  # S5
-    def consolidate_memory(self) -> int: ...                         # S6
-    def record_consolidation(self, pruned: int) -> None: ...         # S6
+    def record_social(
+        self, *, trust=0.0, uncertainty=0.0, name="", pause_s=0.0, claim_conflict=0.0
+    ) -> None: ...  # S5
+    def consolidate_memory(self) -> int: ...  # S6
+    def record_consolidation(self, pruned: int) -> None: ...  # S6
     def explore(self, *, reason="epistemic drive") -> ProbeResult | None: ...  # S6 п2
-    def tick_actuation(self, root: Node, facts=None) -> ExecutorOutcome | None: ...  # S8
-    def attach_speech(self, speak) -> None: ...                                 # S8
+    def tick_actuation(
+        self, root: Node, facts=None
+    ) -> ExecutorOutcome | None: ...  # S8
+    def attach_speech(self, speak) -> None: ...  # S8
     @property
-    def actuation_enabled(self) -> bool: ...                                    # S8
+    def actuation_enabled(self) -> bool: ...  # S8
+    @property
+    def last_goal_telemetry(self) -> tuple[str, str, int, bool, str, str]: ...  # S8 п2
     @property
     def escape_hatch_active(self) -> bool: ...
 ```
@@ -240,6 +249,21 @@ class HostLoop:
 подключает речевой эффектор, когда `SpeechController` создан (диалоговый
 стенд). Поля актуаций пишутся в телеметрию следующего `step_once`
 (`actuation_*`).
+
+`goal_director: GoalDirector | None` (S8 проход 2) — создаётся в
+`build_host_loop` при `config.goal.enabled` **и** `actuation.enabled`, и при
+переданной среде `environment` (`Environment.observe() → Mapping[str, float]`).
+`goal.enabled` без executor'а или среды → `ValueError` (fail-fast). В
+`step_once` после аффективного тика вызывается `goal_director.tick(tick)`; поля
+цели пишутся в телеметрию (`selected_goal`, `goal_reason`, `goal_attempt`,
+`goal_achieved`, `goal_call_status`, `active_specialization`; доступ —
+`loop.last_goal_telemetry`). `goal_director=None` → контур S7/S8 прохода 1
+идентичен. При активном целевом контуре `explore()` подавляется, пока есть цель
+или действие в полёте (§8 SPEC).
+
+`build_host_loop(config, meter=None, ..., environment=None)` — колонки под
+фактический `bus_dim`, гомеостат из `config.homeostasis`, `policy_config` из
+`config.policy`; при `goal.enabled` — `GoalDirector` поверх собранного `loop`.
 
 ## ProbeEffector (probe.py, S6 проход 2)
 
@@ -267,16 +291,18 @@ T4/`ACT_IRREVERSIBLE` (нужен HITL-токен). Неизвестный аф�
 ```python
 class Effector(Protocol):
     @property
-    def goal(self) -> str | None: ...          # что сейчас исполняется (None — простой)
+    def goal(self) -> str | None: ...  # что сейчас исполняется (None — простой)
     def start(self, actuation: Actuation) -> None: ...
     def poll(self) -> ActuationResult: ...
     def preempt(self) -> None: ...
+
 
 WorkFn = Callable[[Actuation], ActuationResult]
 
 
 class DeferredEffector:
     """База: синхронная работа, отложенная на ``latency_ticks`` (детерминизм)."""
+
     def __init__(self, work: WorkFn, *, latency_ticks: int = 0) -> None: ...
 
 
@@ -309,8 +335,8 @@ Shell: ведёт BT-дерево во времени, не блокируя т�
 class ExecutorOutcome:
     status: NodeStatus
     running_goal: str | None
-    impatience: float                 # 0..1 — сигнал нетерпения
-    completed: tuple[ActuationResult, ...]   # завершилось в этом тике → в шину
+    impatience: float  # 0..1 — сигнал нетерпения
+    completed: tuple[ActuationResult, ...]  # завершилось в этом тике → в шину
 
 
 class ActuatorExecutor:
@@ -351,16 +377,95 @@ class ActuatorExecutor:
 - **Детерминизм:** при фиксированных `latency_ticks` прогон воспроизводим.
 - **Завершённость:** `done` после `Success`/`Failure`; дерево не переигрывается.
 
+## GoalDirector (goal_director.py, S8 проход 2)
+
+Shell-владелец **целевого контура в runtime** (ADR-0014/0015). Наблюдает снимок
+фактов, выбирает цель (`select_goal`), строит/ведёт цепочку по цели
+(`backward_chain` + `ActuatorExecutor`), проверяет достижение новым наблюдением
+(`goal_reached`). Core-функции чистые; здесь — I/O и жизненный цикл.
+
+```python
+class Environment(Protocol):
+    def observe(self) -> Mapping[str, float]: ...  # снимок фактов мира
+
+
+@dataclass(frozen=True)
+class GoalAttempt:
+    goal: Goal | None
+    reason: str  # почему цель выбрана / не выбрана
+    trace: OptionTrace | None  # кандидаты + выбранная опция
+    call_status: str  # статус последнего шага (success/failure/…)
+    observed_after: Mapping[str, float]
+    achieved: bool
+    attempts: int
+
+
+class GoalDirector:
+    def __init__(
+        self,
+        *,
+        loop,
+        outcomes,
+        declarations,
+        environment,
+        preferences,
+        max_attempts=3,
+        deadline_ticks=8,
+        cooldown_ticks=1,
+    ) -> None: ...
+    def tick(self, tick: int) -> GoalAttempt: ...
+```
+
+### Правила (S8 проход 2)
+
+- **Жизненный цикл (§7 SPEC):** одно действие в полёте; пока дерево `RUNNING`,
+  директор его **не пересобирает**; повторный запуск запрещён до терминального
+  статуса; между попытками — `cooldown_ticks`.
+- **Периодическое наблюдение:** среда переспрашивается **только** после
+  терминального статуса цепочки; наблюдение продолжается и после исчерпания
+  `max_attempts` (иначе хост не обнаружит изменение среды). Запрет касается
+  **запуска действий**, не наблюдения.
+- **Сброс счётчика попыток:** по **значимому** изменению фактов цели или явному
+  обновлению цели, а не по любому изменению снимка (защита от шума).
+- **Преемпция ≠ отмена:** преемпция (смена цели) останавливает текущее дерево и
+  запускает новое **после** терминального статуса; уже совершённые внешние шаги
+  не откатываются. Отмена (оператор снял исход) → дерево `FAILURE`, цель `None`,
+  пауза до следующего наблюдения.
+- **Два вида успеха (§11 SPEC):** успех вызова (`ActuationStatus.SUCCESS`) не
+  подменяет успех цели (`goal_reached` по новому наблюдению). Успех без изменения
+  состояния → цель открыта; повторы ≤ `max_attempts`.
+- **Сосуществование S6/S8 (§8 SPEC):** при активном S8 `HostLoop.explore()`
+  подавляется, пока есть цель или действие в полёте.
+- **Сборка:** `build_host_loop` создаёт `GoalDirector` при `goal.enabled` и
+  `actuation.enabled`; `HostLoop.step_once` вызывает `director.tick` после
+  аффективного тика. Декларации (`OptionDeclaration`) накладываются на опции окна
+  (`replace` по `option_id`), порядок окна сохраняется.
+- **Валидация при сборке (fail-fast):** каждый `option_id` разрешается в
+  существующую опцию окна; `effect.fact`/`guard.fact` присутствуют в объявленной
+  схеме состояния и имеют значение ∈ [0, 1] (не каждый факт обязан быть конечной
+  целью — вспомогательные/промежуточные допустимы для многошаговых цепочек);
+  дубликаты `option_id` запрещены. Несогласованность → `ValueError`.
+- **Телеметрия (аддитивные поля):** `selected_goal`, `goal_reason`,
+  `goal_attempt`, `goal_achieved`, `goal_call_status`, `active_specialization`
+  (трасса тега колонки; в оценку цели не входит).
+
 ## CapabilityGate (gate.py, S4 + гранулярные права)
 
 ```python
 class CapabilityTier(Enum):
-    T0 = "observation"; T1 = "speech"; T2 = "hitl_action"
-    T3 = "autonomous_reversible"; T4 = "bounded_irreversible"
+    T0 = "observation"
+    T1 = "speech"
+    T2 = "hitl_action"
+    T3 = "autonomous_reversible"
+    T4 = "bounded_irreversible"
 
 
 class Capability(Enum):
-    READ; THINK; SPEAK; ACT_REVERSIBLE; ACT_IRREVERSIBLE
+    READ
+    THINK
+    SPEAK
+    ACT_REVERSIBLE
+    ACT_IRREVERSIBLE
 
 
 class CapabilityGate:
@@ -385,6 +490,7 @@ class ControlChannel:
     loop: HostLoop
     paused: bool = False
     tick: int = 0
+
     def status(self) -> str: ...
     def pause(self) -> None: ...
     def resume(self) -> None: ...
@@ -415,9 +521,9 @@ class BehavioralFingerprint:
     f_profile: FProfile
     reflex_count: int
     stress_peaks: float
-    active_fraction: float   # доля тиков с активной колонкой, [0, 1]
+    active_fraction: float  # доля тиков с активной колонкой, [0, 1]
     resource_alarms: int
-    talk_rate: float         # доля тиков с репликой, [0, 1]
+    talk_rate: float  # доля тиков с репликой, [0, 1]
     throttle_rate: float
     explore_rate: float
     initiative_rate: float
@@ -449,8 +555,8 @@ BACKLOG `[S4][policy]`). Два входа: pytest-гейт (`test_sensitivity.p
 class SensitivityCase:
     knob: str
     values: tuple[float, ...]
-    metric: str        # имя метрики BehavioralFingerprint
-    direction: str     # "nondecreasing" | "nonincreasing" | "bounded"
+    metric: str  # имя метрики BehavioralFingerprint
+    direction: str  # "nondecreasing" | "nonincreasing" | "bounded"
 
 
 def build_sensitivity_matrix() -> tuple[SensitivityCase, ...]: ...
@@ -644,26 +750,57 @@ class RecordingLlmClient:  # delegates to FakeLlmClient, records calls
 «нейтральность». Абсолютные значения не проверяемы — проверяется **порядок**.
 
 ```python
-class ToneAxis(Enum): VALENCE; STRESS; GOAL_SCOPE
-class DistortionClass(Enum): NONE; MASKING; INVERSION; FABRICATION
+class ToneAxis(Enum):
+    VALENCE
+    STRESS
+    GOAL_SCOPE
+
+
+class DistortionClass(Enum):
+    NONE
+    MASKING
+    INVERSION
+    FABRICATION
+
+
 class ToneScorer(Protocol):
     def score(self, text: str, axis: ToneAxis) -> float: ...
+
 
 @dataclass(frozen=True)
 class LexiconToneScorer:  # deterministic polarity lexicon (CI baseline)
     def score(self, text, axis) -> float: ...
 
+
 @dataclass(frozen=True)
 class EmbeddingToneScorer:  # opt-in: anchors + Embedder
     embedder: Embedder
+
     def score(self, text, axis) -> float: ...
 
+
 @dataclass(frozen=True)
-class FidelityPair: id; frame_a; frame_b; axis; expect_ordered
+class FidelityPair:
+    id
+    frame_a
+    frame_b
+    axis
+    expect_ordered
+
+
 @dataclass(frozen=True)
-class FidelityResult: pair; score_a; score_b; ordered; distortion; passed; reason
+class FidelityResult:
+    pair
+    score_a
+    score_b
+    ordered
+    distortion
+    passed
+    reason
+
 
 def check_fidelity(pair, *, scorer) -> FidelityResult: ...
+
 
 class FidelityHarness:
     def __init__(self, responder, *, scorer=None) -> None: ...
@@ -755,7 +892,8 @@ Ablation выключает генератор (пустое окно) — це�
 3. `time_scale` масштабирует субъективное время (1.0 = жизнь).
 4. Непрерывность: эмоциональный контур всегда включён (ADR-0006).
 5. Non-finite → HostIntegrityError (fail-fast).
-6. Телеметрия: 42 плоских поля (S4 + escape hatch + S8 актуации).
+6. Телеметрия: 49 плоских полей (S4 + escape hatch + S8 актуации + целевой
+   контур прохода 2).
 7. **Рефлекс ≤ 1 тик:** критический сигнал → throttle в том же тике.
 8. **Обратимость:** throttle восстанавливает базовое `k` при `active=False`;
    escape hatch сбрасывается при нормализации сигнала.

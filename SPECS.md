@@ -42,15 +42,20 @@
 | `config/presets` | — | — | — | ✅ реализовано (S7) | S7 |
 | `core/actuation` | [SPEC](src/core/actuation/SPEC.md) | [PLAN](src/core/actuation/PLAN.md) | — | ✅ реализовано (окно/скорер/факты/эффекты/BT/генератор) | S8 |
 | `host/executor` | — | — | — | ✅ реализовано (эффекторы + executor + async) | S8 |
+| `host/goal_director` | — | — | — | ✅ реализовано (целевой контур в runtime) | S8 п2 |
 | `config/actuation` | — | — | — | ✅ реализовано (`ActuationConfig`, дефолт off) | S8 |
-| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1266) | все |
+| `config/goal` | — | — | — | ✅ реализовано (`GoalConfig`/`OptionDeclaration`, дефолт off) | S8 п2 |
+| `tests` | — | — | [README](src/tests/README.md) | ✅ pytest (1412) | все |
 
 SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 диагностика — `stages/S7_SPEC.md`, `stages/S7_PLAN.md`,
 `stages/S7_HITL_PROTOCOL.md` (предыдущие — `stages/S5_SPEC.md`,
 `stages/S5_PLAN.md`); спринт — `stages/ACTUATION_PLAN.md`
 (секвенирование актуаций, S8, ✅ реализовано). Фундамент S8 (2026-10-09) —
-открытое окно выбора + тотальный скорер; BT/async — надстройка.
+открытое окно выбора + тотальный скорер; BT/async — надстройка. **Проход 2 S8**
+(`stages/S8_PASS2_SPEC.md`/`PLAN.md`, ADR-0014/0015) замыкает целевой контур в
+рабочем цикле (цель из снимка фактов, pragmatic относительно цели, жизненный
+цикл исполнения; `host/goal_director.py`, `config/goal`).
 
 **Легенда:** ✅ реализовано · 🟡 частично · ✗ не начато · ⛔ заблокировано.
 
@@ -66,7 +71,9 @@ SPEC стадии — `stages/S6_SPEC.md`, `stages/S6_PLAN.md`;
 длинный горизонт, ночной цикл, MCP-зондирование) → `S7` HITL-диагностика ✅
 (harness, пресеты, дерево проб, самоотчёт сброса; ADR-0010) → `S8` секвенирование
 актуаций ✅ (executive, BT, async, MCP-действие; ADR-0012;
-`stages/ACTUATION_PLAN.md`).
+`stages/ACTUATION_PLAN.md`) → `S8` проход 2 ✅ (целевой контур в runtime:
+цель из снимка фактов, pragmatic относительно цели, жизненный цикл исполнения;
+ADR-0014/0015, `stages/S8_PASS2_SPEC.md`).
 
 Подробно — [`BUILD_ROADMAP.md`](BUILD_ROADMAP.md); ворота — [`VALIDATION.md`](VALIDATION.md).
 

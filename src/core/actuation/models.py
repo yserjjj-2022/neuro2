@@ -118,11 +118,16 @@ class OptionContext:
         uncertainty: Метакогнитивная неопределённость, [0, 1].
         task: Активная задача/аттрактор (тег колонки).
         mode: Режим хоста (game/cooperative/free).
+        goal: Выбранная цель-исход (этап 6); None → pragmatic-оценка выключена
+            (совместимость этапов 1–5).
+        facts: Снимок фактов мира для оценки относительно цели (этап 6).
     """
 
     uncertainty: float
     task: str = "none"
     mode: str = "free"
+    goal: Goal | None = None
+    facts: Mapping[str, float] = field(default_factory=lambda: dict[str, float]())
 
     def __post_init__(self) -> None:
         """Валидация: uncertainty в [0, 1].
@@ -519,3 +524,33 @@ class Goal:
         """
         if not 0.0 <= self.value <= 1.0:
             raise ValueError(f"goal value must be in [0, 1], got {self.value}")
+
+
+@dataclass(frozen=True)
+class PreferredOutcome:
+    """Предпочтительный исход целевого контура (этап 6, ADR-0014).
+
+    «Что считаем желательным» — наше решение, а не сигнал колонки. Цель
+    формируется из сочетания предпочтительных исходов и снимка фактов
+    (``select_goal``), а не из тега победившей специализации.
+
+    Attributes:
+        fact: Желаемый факт мира.
+        target: Желаемое значение факта ∈ [0, 1].
+        priority: Порядок при нескольких неудовлетворённых исходах, >= 0.
+    """
+
+    fact: Fact
+    target: float = 1.0
+    priority: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Валидация: target в [0, 1], priority >= 0.
+
+        Raises:
+            ValueError: Если target вне [0, 1] или priority < 0.
+        """
+        if not 0.0 <= self.target <= 1.0:
+            raise ValueError(f"target must be in [0, 1], got {self.target}")
+        if self.priority < 0.0:
+            raise ValueError(f"priority must be >= 0, got {self.priority}")

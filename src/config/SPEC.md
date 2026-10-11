@@ -79,6 +79,8 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `social` | SocialConfig() | ToM (S5) |
 | `autonomy` | AutonomyConfig() | автономия (S6) |
 | `actuation` | ActuationConfig() | секвенирование актуаций (S8) |
+| `goal` | GoalConfig() | цели и приоритеты целевого контура (S8 п2) |
+| `option_declarations` | () | семантика опций `effect`/`guard` (S8 п2) |
 
 ### SpeechConfig (S3)
 
@@ -152,6 +154,23 @@ API-настройки эмбеддера — в окружении (`.env`), н
 | `expected_ticks` | 1 | Ожидаемая длительность шага (нетерпение) |
 | `latency_ticks` | 0 | Задержка завершения эффектора (детерминизм) |
 
+### GoalConfig (S8 проход 2)
+
+Ответственность **разделена**: цели/приоритеты — в `GoalConfig`; семантика опций
+(`effect`/`guard`) — в `OptionDeclaration` по **устойчивому ID** инструмента
+(`Option.id`, неймспейс `tool:<name>`), а не по позиции в окне.
+
+| Поле | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | False | Включать целевой контур; False → S8-совместимость |
+| `outcomes` | () | `tuple[PreferredOutcome, ...]` — желаемые исходы |
+| `max_attempts` | 3 | Ограничение повторов попытки |
+| `deadline_ticks` | 8 | Тайм-аут цепочки → преемпция → `FAILURE` |
+| `cooldown_ticks` | 1 | Пауза между попытками (анти-дребезг) |
+
+`OptionDeclaration` (frozen): `option_id: str` (непустой), `effect: Effect | None`,
+`guard: Guard | None` (хотя бы одно задано).
+
 ## Пресеты (S7-B)
 
 ```python
@@ -161,6 +180,7 @@ def dialogue() -> HostConfig: ...
 def autonomy() -> HostConfig: ...
 def long_horizon() -> HostConfig: ...
 def cooperative() -> HostConfig: ...
+
 
 def load_preset(name: str, *, override: Path | None = None) -> HostConfig: ...
 def available_presets() -> tuple[str, ...]: ...
@@ -205,8 +225,16 @@ CLI: `--preset NAME [--preset-file PATH]`.
    `recency_tau_s<=0`, `factor_learning_rate`∉(0,1] → ValueError.
    `ActuationConfig`: `max_depth<1`, `expected_ticks<0`, `latency_ticks<0`
    → ValueError.
+   `GoalConfig`: `max_attempts<1`, `deadline_ticks<0`, `cooldown_ticks<0`
+   → ValueError. `OptionDeclaration`: пустой `option_id` или ни `effect`, ни
+   `guard` → ValueError.
 2. Все dataclass — frozen.
 3. DI через `build()`.
+4. **Валидация при сборке** (`build_host_loop`, fail-fast): каждый `option_id`
+   декларации разрешается в существующую опцию окна; `effect.fact`/`guard.fact`
+   присутствуют в объявленной схеме состояния и имеют значение ∈ [0, 1] (не
+   каждый факт обязан быть конечной целью — вспомогательные/промежуточные
+   допустимы); дубликаты `option_id` запрещены → `ValueError`.
 
 ## Open Questions
 

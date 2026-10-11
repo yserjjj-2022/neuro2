@@ -99,6 +99,12 @@ class TelemetryLogger:
         actuation_impatience: float = 0.0,
         actuation_steps: int = 0,
         actuation_preemptions: int = 0,
+        selected_goal: str = "",
+        goal_reason: str = "",
+        goal_attempt: int = 0,
+        goal_achieved: bool = False,
+        goal_call_status: str = "",
+        active_specialization: str = "",
         channel_contrib: str = "",
     ) -> None:
         """Записать событие в лог.
@@ -146,6 +152,12 @@ class TelemetryLogger:
             actuation_impatience: Сигнал нетерпения [0, 1] (S8).
             actuation_steps: Завершено шагов актуации на тике (S8).
             actuation_preemptions: Преемпций на тике (S8).
+            selected_goal: Выбранная цель-исход ("" если нет) — S8 проход 2.
+            goal_reason: Причина выбора/невыбора цели — S8 проход 2.
+            goal_attempt: Число попыток текущей цели — S8 проход 2.
+            goal_achieved: Достигнута ли цель по наблюдению — S8 проход 2.
+            goal_call_status: Статус последнего шага (running/success/failure).
+            active_specialization: Тег активной специализации колонки (трасса).
             channel_contrib: CSV-вклады каналов шины в F (tag:вклад) — BACKLOG.
         """
         event = TelemetryEvent(
@@ -189,6 +201,12 @@ class TelemetryLogger:
             actuation_impatience=actuation_impatience,
             actuation_steps=actuation_steps,
             actuation_preemptions=actuation_preemptions,
+            selected_goal=selected_goal,
+            goal_reason=goal_reason,
+            goal_attempt=goal_attempt,
+            goal_achieved=goal_achieved,
+            goal_call_status=goal_call_status,
+            active_specialization=active_specialization,
             channel_contrib=channel_contrib,
             phase=self.phase,
             mode=self.mode,
