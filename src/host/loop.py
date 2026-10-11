@@ -550,6 +550,15 @@ class HostLoop:
         return self._current_tick
 
     @property
+    def last_free_energy(self) -> float:
+        """Свободная энергия F последнего выполненного тика (S1).
+
+        Публичный доступ к F нужен для контроля содержательности выбора (§13:
+        сопоставимое возбуждение → разное действие) без чтения приватного поля.
+        """
+        return self._prev_f
+
+    @property
     def last_reset_level(self) -> str:
         """Уровень сброса последнего тика ("", soft/freeze/hard) — S6."""
         return self._reset_level_pending
@@ -926,6 +935,7 @@ def build_host_loop(
     probe_fn: ProbeFn | None = None,
     affordances: AffordanceMap | None = None,
     environment: Environment | None = None,
+    gate: CapabilityGate | None = None,
 ) -> HostLoop:
     """Собрать host loop: провайдеры → шина → колонки → конвейер → телеметрия.
 
@@ -949,6 +959,10 @@ def build_host_loop(
         probe_fn: Реальный транспорт зондирования (ADR-0011). None → mock.
         affordances: Готовая карта аффордансов (приоритетнее реестра). None →
             из реестра, иначе ``default_affordances()``.
+        environment: Источник снимка фактов мира (обязателен при ``goal.enabled``).
+        gate: Capability gate (единая точка side-effect). None → дефолтный
+            (T4 + чтение/обратимое/необратимое). Инъекция нужна для проверки
+            отказа **до** вызова (deny) в тестах.
 
     Returns:
         Готовый к ``run()`` HostLoop.
@@ -1097,15 +1111,19 @@ def build_host_loop(
                 affordances = default_affordances()
         probe_effector = ProbeEffector(
             affordances=affordances,
-            gate=CapabilityGate(
-                max_tier=CapabilityTier.T4,
-                granted=frozenset(
-                    {
-                        Capability.READ,
-                        Capability.ACT_REVERSIBLE,
-                        Capability.ACT_IRREVERSIBLE,
-                    }
-                ),
+            gate=(
+                gate
+                if gate is not None
+                else CapabilityGate(
+                    max_tier=CapabilityTier.T4,
+                    granted=frozenset(
+                        {
+                            Capability.READ,
+                            Capability.ACT_REVERSIBLE,
+                            Capability.ACT_IRREVERSIBLE,
+                        }
+                    ),
+                )
             ),
             probe_fn=probe_fn,
         )

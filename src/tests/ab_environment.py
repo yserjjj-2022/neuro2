@@ -7,9 +7,17 @@
 
 ``AbEnvironment`` — источник снимка фактов (``observe``) и транспорт
 зондирования (``probe_fn``): вызов ``service_a``/``service_b`` меняет
-соответствующий флаг. Флаги ``forbid`` (оператор запретил — отказ гейта) и
-``lie`` (успех без изменения состояния) моделируют два разных вида успеха
-(SPEC §11).
+соответствующий флаг. Три различимых исхода отказа:
+
+- ``deny`` — оператор **отозвал право** (Gate deny): запрос не доходит до
+  транспорта, ``calls`` пуст;
+- ``forbid`` — Gate разрешил, но **сервис отклонил** запрос: вызов состоялся
+  (в ``calls``), состояние не изменилось;
+- ``lie`` — вызов «успешен», но состояние не меняется (успех вызова ≠ успех
+  цели, SPEC §11).
+
+Это три разных вида отказа/успеха, и их нельзя смешивать: «запрет до вызова» —
+про авторизацию, «отказ сервиса» — про исполнение.
 """
 
 from __future__ import annotations
@@ -17,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from src.core.actuation import Effect, Fact, PreferredOutcome
+from src.host.gate import Capability, CapabilityGate
 from src.mcp.models import SignalCategory
 from src.mcp.probe import Affordance, AffordanceMap
 
@@ -44,13 +53,26 @@ def ab_outcomes(
     )
 
 
+def ab_gate_denying(service: str) -> CapabilityGate:
+    """Gate, отзывающий право действия у ``service`` (deny до вызова).
+
+    Отзывает ``ACT_REVERSIBLE``: запрос на любой обратимый сервис получит
+    ``GateDecision(allowed=False)`` и **не** дойдёт до транспорта (``calls``
+    останется пустым).
+    """
+    del service  # deny моделируется отзывом права на класс действий
+    gate = CapabilityGate()
+    gate.revoke(Capability.ACT_REVERSIBLE)
+    return gate
+
+
 class AbEnvironment:
     """Среда стенда: снимок фактов + транспорт сервисов.
 
     Attributes:
-        forbid: Имена сервисов, которые оператор запретил (отказ гейта).
+        forbid: Имена сервисов, которые **отклонил сам сервис** (Gate разрешил).
         lie: Инструмент сообщает об успехе, но состояние не меняется (§11).
-        calls: Имена реально вызванных сервисов (для контроля).
+        calls: Имена реально дошедших до транспорта сервисов (для контроля).
     """
 
     def __init__(
@@ -78,10 +100,15 @@ class AbEnvironment:
         self._facts[name] = value
 
     def probe_fn(self, affordance: Affordance) -> tuple[float, ...]:
-        """Транспорт сервиса: меняет флаг (если не ``lie``); ``forbid`` → отказ."""
+        """Транспорт сервиса: меняет флаг (если не ``lie``); ``forbid`` → отказ.
+
+        Вызывается **только** если Gate разрешил запрос (см. ``ab_gate_denying``):
+        ``calls`` фиксирует факт вызова, поэтому Gate deny даёт пустой ``calls``,
+        а отказ сервиса — запись в ``calls`` без изменения состояния.
+        """
         self.calls.append(affordance.name)
         if affordance.name in self.forbid:
-            raise RuntimeError(f"forbidden: {affordance.name}")
+            raise RuntimeError(f"service refused: {affordance.name}")
         if not self.lie:
             if affordance.name == "service_a":
                 self._facts["a_serviced"] = 1.0

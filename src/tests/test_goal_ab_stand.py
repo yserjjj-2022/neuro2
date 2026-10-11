@@ -21,6 +21,7 @@ from src.config import (
     OptionDeclaration,
 )
 from src.core.actuation import Effect
+from src.host.gate import CapabilityGate
 from src.host.loop import build_host_loop
 from src.host.sensitivity import DeterministicMeter
 from src.tests.ab_environment import (
@@ -28,6 +29,7 @@ from src.tests.ab_environment import (
     B_SERVICED,
     AbEnvironment,
     ab_affordances,
+    ab_gate_denying,
     ab_outcomes,
 )
 
@@ -40,7 +42,13 @@ def _declarations() -> tuple[OptionDeclaration, ...]:
     )
 
 
-def _build(tmp_path: Path, env: AbEnvironment, **goal_kwargs):
+def _build(
+    tmp_path: Path,
+    env: AbEnvironment,
+    *,
+    gate: CapabilityGate | None = None,
+    **goal_kwargs,
+):
     """Собрать хост через рабочий цикл с целевым контуром."""
     cfg = HostConfig(
         memory=MemoryConfig(enabled=False),
@@ -56,6 +64,7 @@ def _build(tmp_path: Path, env: AbEnvironment, **goal_kwargs):
         probe_fn=env.probe_fn,
         affordances=ab_affordances(),
         environment=env,
+        gate=gate,
     )
 
 
@@ -107,12 +116,35 @@ class TestAcceptanceScenarios:
         finally:
             loop.close()
 
-    def test_forbidden_action_traced(self, tmp_path: Path) -> None:
-        """Действие запрещено → нет изменения состояния, причина в трассе."""
+    def test_gate_deny_no_call(self, tmp_path: Path) -> None:
+        """Gate deny → запрос не доходит до сервиса (calls пуст), цель открыта.
+
+        Это проверка **авторизации**: право ``ACT_REVERSIBLE`` отозвано, поэтому
+        ``ProbeEffector`` отклоняет запрос до транспорта. Раньше это называлось
+        «запретом действия», но фактически проверяло отказ сервиса.
+        """
+        env = AbEnvironment()
+        loop = _build(tmp_path, env, gate=ab_gate_denying("service_a"))
+        try:
+            loop.run(5)
+            assert env.calls == []  # deny до вызова — сервис не тронут
+            assert env.observe()["a_serviced"] == 0.0
+            assert loop.last_goal_telemetry[3] is False
+        finally:
+            loop.close()
+
+    def test_service_refusal_call_recorded(self, tmp_path: Path) -> None:
+        """Сервис отклонил запрос → вызов есть, состояние не изменилось.
+
+        Отличие от Gate deny: запрос **дошёл** до транспорта (``calls`` содержит
+        сервис), но сервис ответил ошибкой → состояние не изменилось, цель
+        остаётся открытой.
+        """
         env = AbEnvironment(forbid=("service_a",))
         loop = _build(tmp_path, env, max_attempts=1)
         try:
             loop.run(5)
+            assert env.calls == ["service_a"]  # вызов состоялся
             assert env.observe()["a_serviced"] == 0.0
             assert loop.last_goal_telemetry[3] is False
         finally:
@@ -150,40 +182,57 @@ class TestFControl:
     """Контроль против эффекта F (§13): одинаковое возбуждение → разный инструмент."""
 
     def test_comparable_excitation_different_tool(self, tmp_path: Path) -> None:
-        """A- и B-ситуации → разные инструменты (service_a vs service_b).
+        """Симметричные A- и B-ситуации → разные инструменты при равном F.
 
-        Общее возбуждение сопоставимо (те же провайдеры/seed, отличаются лишь
-        предпочтительный исход и факт среды); различие действия — содержательное,
-        не следствие смены готовности действовать.
+        Ситуации **симметричны**: в одной требует обслуживания только A, в другой
+        — только B (не «оба» против «уже обслужен A»). Общее возбуждение
+        сопоставимо (те же провайдеры/seed; различие — какой исход
+        неудовлетворён). Проверяем, что различие действия — содержательное, а не
+        следствие смены готовности действовать: **численные метрики F на тике
+        выбора совпадают**, а выбранные инструменты различны.
         """
-        env_a = AbEnvironment()
+        env_a = AbEnvironment(b_serviced=1.0)  # только A требует обслуживания
         loop_a = _build(tmp_path / "a", env_a)
         try:
-            loop_a.run(3)
+            loop_a.run(2)
+            f_a = loop_a.last_free_energy
+            goal_a = loop_a.last_goal_telemetry[0]
         finally:
             loop_a.close()
 
-        env_b = AbEnvironment(a_serviced=1.0)
+        env_b = AbEnvironment(a_serviced=1.0)  # только B требует обслуживания
         loop_b = _build(tmp_path / "b", env_b)
         try:
-            loop_b.run(3)
+            loop_b.run(2)
+            f_b = loop_b.last_free_energy
+            goal_b = loop_b.last_goal_telemetry[0]
         finally:
             loop_b.close()
 
+        # Содержательный выбор: разные цели и разные инструменты.
+        assert goal_a == "a_serviced"
+        assert goal_b == "b_serviced"
         assert env_a.calls == ["service_a"]
         assert env_b.calls == ["service_b"]
-        assert env_a.calls != env_b.calls
+        # Возбуждение сопоставимо (не «сработал другой порог готовности»).
+        assert abs(f_a - f_b) < 1e-6, (f_a, f_b)
 
     def test_determinism(self, tmp_path: Path) -> None:
-        """Одинаковый вход → одинаковая трасса выбора."""
-        results = []
+        """Одинаковый вход → одинаковая **полная** трасса (по тикам + вызовы).
+
+        Сравнивается вся последовательность решений (не только последний тик):
+        иначе разные промежуточные решения с одинаковым финалом прошли бы мимо.
+        """
+        traces = []
         for run in range(2):
             env = AbEnvironment()
             loop = _build(tmp_path / f"run{run}", env)
             try:
+                per_tick = []
                 for tick in range(4):
                     loop.step_once(tick)
-                results.append(loop.last_goal_telemetry)
+                    per_tick.append(loop.last_goal_telemetry)
+                traces.append((tuple(per_tick), tuple(env.calls)))
             finally:
                 loop.close()
-        assert results[0] == results[1]
+        assert traces[0] == traces[1]

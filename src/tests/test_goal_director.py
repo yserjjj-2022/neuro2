@@ -8,6 +8,7 @@ default keeping the S7/S8-pass-1 contour identical.
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 from src.config import (
@@ -18,7 +19,16 @@ from src.config import (
     MemoryConfig,
     OptionDeclaration,
 )
-from src.core.actuation import Effect
+from src.core.actuation import (
+    Effect,
+    Fact,
+    Guard,
+    Node,
+    NodeKind,
+    NodeStatus,
+)
+from src.host.executor import ExecutorOutcome
+from src.host.goal_director import GoalDirector, _first_action
 from src.host.loop import build_host_loop
 from src.host.sensitivity import DeterministicMeter
 from src.tests.ab_environment import (
@@ -258,6 +268,51 @@ class TestLifecycle:
         finally:
             loop.close()
 
+    def test_goal_reached_in_flight(self, tmp_path: Path) -> None:
+        """Цель достигнута до терминального poll → событие «в полёте», не смена.
+
+        Среда достигает цели A (имитируем внешнее изменение, пока вызов ещё
+        ``RUNNING``). Директор обязан **разрешить активную попытку**: зафиксировать
+        достижение именно A, а не молча заменить её другой целью/``None``.
+        """
+        env = AbEnvironment(b_serviced=1.0)  # только A требует обслуживания
+        loop = _build(tmp_path, env, latency_ticks=5)
+        try:
+            loop.step_once(0)  # launch service_a (running)
+            assert loop.last_goal_telemetry[0] == "a_serviced"
+            assert loop.last_goal_telemetry[4] == "running"
+            # Среда достигла A, пока вызов ещё не терминален.
+            env.set_fact("a_serviced", 1.0)
+            loop.step_once(1)
+            selected, reason, _, achieved, _, _ = loop.last_goal_telemetry
+            assert selected == "a_serviced"  # достижение старой цели, не смена
+            assert achieved is True
+            assert "in flight" in reason
+        finally:
+            loop.close()
+
+    def test_goal_change_stops_external_operation(self, tmp_path: Path) -> None:
+        """Смена цели преемптит внешнюю операцию (не только внутренний reset).
+
+        Долгий вызов A (``latency_ticks`` велик, работа ещё не выполнена) сменяется
+        на B: преемпция через executor должна **остановить** эффектор A — работа A
+        не выполняется вовсе (``service_a`` не в ``calls``), запускается B.
+        """
+        env = AbEnvironment()
+        outcomes = ab_outcomes()
+        loop = _build(tmp_path, env, outcomes=outcomes, latency_ticks=6)
+        try:
+            loop.step_once(0)  # launch service_a (running, работа не завершена)
+            assert loop.last_goal_telemetry[0] == "a_serviced"
+            # Оператор снял исход A → преемпция: A не должен выполниться.
+            loop.goal_director.outcomes = (outcomes[1],)
+            for tick in range(1, 12):
+                loop.step_once(tick)
+            assert "service_a" not in env.calls  # внешняя операция остановлена
+            assert env.calls == ["service_b"]
+        finally:
+            loop.close()
+
 
 class TestCoexistence:
     """S6/S8: explore подавляется при активном целевом контуре (§8)."""
@@ -284,3 +339,89 @@ class TestCoexistence:
             assert loop.goal_director.active is False
         finally:
             loop.close()
+
+
+def _action(name: str) -> Node:
+    """Action-лист для теста структуры дерева."""
+    from src.core.actuation import Actuation, ActuationKind
+
+    return Node(
+        NodeKind.ACTION,
+        name=name,
+        actuation=Actuation(ActuationKind.INVOKE_TOOL, name, name),
+    )
+
+
+def _condition(fact: Fact, value: float) -> Node:
+    """Condition-лист для теста структуры дерева."""
+    return Node(NodeKind.CONDITION, name=fact.name, guard=Guard(fact, value))
+
+
+class TestLaunchTrace:
+    """Трасса запуска привязана к фактическому листу дерева (§7, п.4)."""
+
+    def test_first_action_finds_leaf_after_subgoal(self) -> None:
+        """Sequence(subgoal, action) → первый Action = исполняемый лист."""
+        subgoal = _condition(A_SERVICED, 1.0)
+        leaf = _action("tool:service_a")
+        tree = Node(NodeKind.SEQUENCE, name="tool:service_a", children=(subgoal, leaf))
+        found = _first_action(tree)
+        assert found is not None
+        assert found.name == "tool:service_a"
+
+    def test_first_action_none_for_pure_condition(self) -> None:
+        """Чистый Condition (безопасный отказ) → нет исполняемого листа."""
+        assert _first_action(_condition(A_SERVICED, 1.0)) is None
+
+    def test_launched_goal_matches_chain_leaf(self, tmp_path: Path) -> None:
+        """`launched_goal` — реальный лист цепочки, не победитель скоринга."""
+        env = AbEnvironment()
+        loop = _build(tmp_path, env)
+        try:
+            loop.step_once(0)
+            attempt = loop.goal_director.tick(0)  # повторный тик для доступа
+            assert attempt.chain_goal == "tool:service_a"
+            assert attempt.launched_goal == "tool:service_a"
+            assert "launched via tool:service_a" in loop.last_goal_telemetry[1]
+        finally:
+            loop.close()
+
+    def test_launched_goal_is_leaf_not_chain_root(self) -> None:
+        """Фактически запущенный лист ≠ корень цепочки при подцели (guard).
+
+        ``service_a`` требует предпосылку ``B обслужен`` (``guard``). Цепочка по
+        цели A становится ``Sequence(service_b, service_a)``: корень цепочки —
+        ``tool:service_a``, но **фактически запускается** первый лист —
+        ``tool:service_b``. Трасса запуска берёт лист, а не корень.
+        """
+        env = AbEnvironment()
+
+        class _StubLoop:
+            probe_effector = types.SimpleNamespace(affordances=ab_affordances())
+            executor = None
+
+            def active_task(self) -> str:
+                return ""
+
+            def tick_actuation(self, root, facts=None):
+                return ExecutorOutcome(NodeStatus.RUNNING, "tool:service_b", 0.0, ())
+
+        declarations = (
+            OptionDeclaration(
+                "tool:service_a",
+                effect=Effect(A_SERVICED, value=1.0),
+                guard=Guard(B_SERVICED, 1.0),  # предпосылка: B обслужен
+            ),
+            OptionDeclaration("tool:service_b", effect=Effect(B_SERVICED, value=1.0)),
+        )
+        director = GoalDirector(
+            loop=_StubLoop(),  # type: ignore[arg-type]
+            outcomes=(ab_outcomes()[0],),  # только A
+            declarations=declarations,
+            environment=env,
+            max_depth=3,
+        )
+        attempt = director.tick(0)
+        assert attempt.chain_goal == "tool:service_a"  # корень выведенной цепочки
+        assert attempt.launched_goal == "tool:service_b"  # фактический лист
+        assert attempt.reason == "launched via tool:service_b"

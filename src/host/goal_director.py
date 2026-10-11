@@ -91,15 +91,22 @@ class _HostLike(Protocol):
 class GoalAttempt:
     """Итог одного тика директора (для телеметрии/тестов).
 
+    Три уровня трассы **разделены** (победитель глобального скоринга ≠ выбранная
+    цепочка ≠ фактически запущенный лист — их совпадение не гарантировано):
+
     Attributes:
         goal: Выбранная цель-исход (None — все исходы удовлетворены/нет исходов).
         reason: Почему цель выбрана/не выбрана (аудит).
-        trace: Трасса выбора опции в окне (кандидаты + выбранная); None — не
-            оценивалось на этом тике.
+        trace: Трасса **глобального** скоринга окна (кандидаты + выбранная); None —
+            не оценивалось на этом тике.
         call_status: Статус последнего шага (``running``/``success``/``failure``).
         observed_after: Снимок фактов после терминального статуса (иначе текущий).
         achieved: Достигнута ли цель по наблюдению (успех цели, не вызова).
         attempts: Число попыток текущей цели.
+        chain_goal: Имя корня выведенной цепочки (опция, достигающая конечной
+            цели), "" если дерево не строилось.
+        launched_goal: Идентификатор **фактически запущенного** листа дерева
+            (первый ``Action`` выведенной цепочки), "" если запуска не было.
     """
 
     goal: Goal | None
@@ -109,6 +116,31 @@ class GoalAttempt:
     observed_after: Mapping[str, float]
     achieved: bool
     attempts: int
+    chain_goal: str = ""
+    launched_goal: str = ""
+
+
+def _first_action(node: Node) -> Node | None:
+    """Первый ``Action``-лист в порядке обхода дерева (чистая).
+
+    Генератор строит ``Sequence(subtree, action)`` — исполняемый лист идёт после
+    подцели, поэтому фактически запускается **первый** ``Action`` в порядке
+    ``tick``. Возвращает None, если дерево — чистый ``Condition`` (безопасный
+    отказ): тогда запуска нет.
+
+    Args:
+        node: Корень выведенного дерева.
+
+    Returns:
+        Первый ``Action``-узел или None.
+    """
+    if node.kind is NodeKind.ACTION:
+        return node
+    for child in node.children:
+        found = _first_action(child)
+        if found is not None:
+            return found
+    return None
 
 
 def build_goal_window(
@@ -231,6 +263,8 @@ class GoalDirector:
         self._goal_value: float | None = None
         self._trace: OptionTrace | None = None
         self._call_status = ""
+        self._chain_goal = ""
+        self._launched_goal = ""
 
     @property
     def active(self) -> bool:
@@ -245,17 +279,56 @@ class GoalDirector:
     def tick(self, tick: int) -> GoalAttempt:
         """Провести тик целевого контура (наблюдение → цель → исполнение).
 
+        Порядок важен (§7): **пока есть активная попытка**, сначала разрешается её
+        жизненный цикл — проверка, не достигнута ли **её** цель новым наблюдением,
+        опрос исполнения, фиксация завершения. Только затем выбирается следующая
+        цель. Иначе достигнутая цель могла бы «исчезнуть» (её сменил бы
+        ``select_goal``) до обработки терминального результата, и достижение не
+        получило бы собственного события.
+
         Args:
             tick: Номер тика хоста (для трассы; логика от него не зависит).
 
         Returns:
-            GoalAttempt — выбранная цель, причина, трасса, статус, наблюдение.
+            GoalAttempt — выбранная цель, причина, трассы, статус, наблюдение.
         """
         facts = dict(self.environment.observe())
+
+        # 1. Активная попытка → сначала разрешаем её жизненный цикл.
+        if self._running and self._goal is not None:
+            active = self._goal
+            # 1a. Цель уже достигнута новым наблюдением — в т.ч. если вызов изменил
+            #     среду на прошлом тике, до терминального poll. Останавливаем дерево
+            #     и фиксируем успех **этой** цели, а не молча меняем её другой.
+            if goal_reached(active, facts):
+                return self._achieve(active, facts, "goal achieved (in flight)")
+            # 1b. Цель перевыбирается каждый тик: смена/снятие исхода оператором —
+            #     преемпция (новое вместо старого) или отмена (пауза).
+            goal = select_goal(self.outcomes, facts)
+            if goal is None:
+                self._abandon()
+                return GoalAttempt(
+                    None,
+                    "cancelled (no unsatisfied outcome)",
+                    self._trace,
+                    self._call_status,
+                    facts,
+                    True,
+                    self._attempts,
+                    self._chain_goal,
+                    self._launched_goal,
+                )
+            if goal != active:
+                self._begin_goal(goal)  # преемптит активное дерево
+                # Новая цель запускается на этом же тике (ниже).
+            else:
+                return self._advance(facts)
+
+        # 2. Активной попытки нет → выбираем цель по текущему наблюдению.
         goal = select_goal(self.outcomes, facts)
 
         if goal is None:
-            self._abandon(facts)
+            self._abandon()
             return GoalAttempt(
                 None,
                 "no unsatisfied outcome",
@@ -264,18 +337,17 @@ class GoalDirector:
                 facts,
                 True,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         if self._goal is None or goal != self._goal:
             self._begin_goal(goal)
-        elif not self._running and self._changed(goal, facts):
+        elif self._changed(goal, facts):
             # Значимое изменение факта цели → сброс попыток (не любой шум).
             self._attempts = 0
             self._exhausted = False
             self._cooldown = 0
-
-        if self._running:
-            return self._advance(goal, facts)
 
         if self._exhausted:
             return GoalAttempt(
@@ -286,6 +358,8 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         if self._cooldown > 0:
@@ -298,12 +372,18 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         return self._launch(goal, facts)
 
     def _begin_goal(self, goal: Goal) -> None:
         """Начать жизненный цикл новой цели (сброс попыток, преемпция)."""
+        if self._running and self._goal is not None:
+            # Преемпция: смена цели останавливает текущее дерево (без отката
+            # внешних шагов) — новое вместо старого (ADR-0012 §7, §7 SPEC).
+            self._preempt(self._goal)
         self._goal = goal
         self._tree = None
         self._running = False
@@ -314,6 +394,8 @@ class GoalDirector:
         self._goal_value = None
         self._trace = None
         self._call_status = ""
+        self._chain_goal = ""
+        self._launched_goal = ""
 
     def _changed(self, goal: Goal, facts: Mapping[str, float]) -> bool:
         """Изменилось ли значение факта цели значимо с прошлого наблюдения."""
@@ -326,7 +408,13 @@ class GoalDirector:
         return changed
 
     def _launch(self, goal: Goal, facts: Mapping[str, float]) -> GoalAttempt:
-        """Построить цепочку по цели и запустить исполнение (новый тик)."""
+        """Построить цепочку по цели и запустить исполнение (новый тик).
+
+        Трассы **разделены**: ``_trace`` — победитель глобального скоринга окна
+        (аудит конкуренции), ``_chain_goal`` — опция, достигающая конечной цели
+        (корень выведенной цепочки), ``_launched_goal`` — фактически запущенный
+        лист. Их совпадение не гарантировано.
+        """
         context = OptionContext(
             uncertainty=0.0,
             task=self.loop.active_task(),
@@ -342,6 +430,9 @@ class GoalDirector:
             context=context,
             preferences=self.preferences,
         )
+        leaf = _first_action(tree)
+        self._chain_goal = tree.name
+        self._launched_goal = leaf.name if leaf is not None else ""
         # Повторная попытка: то же дерево структурно равно прошлому, а executor
         # помнит терминальный итог и не переигрывает листья. Явный сброс
         # заставляет дерево переиграться (fail-safe повтор, §7).
@@ -352,22 +443,85 @@ class GoalDirector:
         self._running = True
         self._elapsed = 0
         self._call_status = ""
+        if leaf is None:
+            # Безопасный отказ: чистый Condition без действия — не запускаем.
+            self._running = False
+            self._tree = None
+            self._finish_failed()
+            return GoalAttempt(
+                goal,
+                "unreachable (no action)",
+                self._trace,
+                self._call_status,
+                facts,
+                False,
+                self._attempts,
+                self._chain_goal,
+                self._launched_goal,
+            )
         outcome = self.loop.tick_actuation(tree, facts)
         if outcome is not None:
             self._call_status = outcome.status.value
-        chosen = self._trace.chosen.id if self._trace.chosen else "none"
         return GoalAttempt(
             goal,
-            f"launched via {chosen}",
+            f"launched via {self._launched_goal}",
             self._trace,
             self._call_status,
             facts,
             False,
             self._attempts,
+            self._chain_goal,
+            self._launched_goal,
         )
 
-    def _advance(self, goal: Goal, facts: Mapping[str, float]) -> GoalAttempt:
-        """Продвинуть бегущее дерево на тик (deadline → преемпция)."""
+    def _achieve(
+        self, goal: Goal, facts: Mapping[str, float], reason: str
+    ) -> GoalAttempt:
+        """Зафиксировать достижение цели по наблюдению (успех цели, не вызова).
+
+        Останавливает активное дерево (преемпция, если что-то бежит) и сбрасывает
+        счётчик попыток. Отдельный путь для случая «цель достигнута в полёте»: не
+        дожидаясь терминального ``poll``, достижение получает собственное событие.
+        """
+        if self._running:
+            self._preempt(goal)
+        self._running = False
+        self._tree = None
+        self._attempts = 0
+        self._exhausted = False
+        self._cooldown = 0
+        return GoalAttempt(
+            goal,
+            reason,
+            self._trace,
+            self._call_status,
+            facts,
+            True,
+            self._attempts,
+            self._chain_goal,
+            self._launched_goal,
+        )
+
+    def _advance(self, facts: Mapping[str, float]) -> GoalAttempt:
+        """Продвинуть бегущее дерево на тик (deadline → преемпция).
+
+        Вызывается, когда активная цель **не** достигнута (достижение в полёте
+        обрабатывается в ``tick`` до этого пути).
+        """
+        goal = self._goal
+        if goal is None:  # недостижимо: _advance вызывается только с активной целью
+            return GoalAttempt(
+                None,
+                "no active goal",
+                self._trace,
+                self._call_status,
+                facts,
+                False,
+                self._attempts,
+                self._chain_goal,
+                self._launched_goal,
+            )
+
         self._elapsed += 1
         if self.deadline_ticks and self._elapsed > self.deadline_ticks:
             self._preempt(goal, facts)
@@ -380,6 +534,8 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         tree = self._tree
@@ -394,6 +550,8 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
         outcome = self.loop.tick_actuation(tree, facts)
         if outcome is None:
@@ -408,6 +566,8 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         self._call_status = outcome.status.value
@@ -420,6 +580,8 @@ class GoalDirector:
                 facts,
                 False,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
 
         # Терминальный статус → новое наблюдение и проверка успеха цели.
@@ -438,6 +600,8 @@ class GoalDirector:
                 after,
                 True,
                 self._attempts,
+                self._chain_goal,
+                self._launched_goal,
             )
         self._finish_failed()
         return GoalAttempt(
@@ -448,6 +612,8 @@ class GoalDirector:
             after,
             False,
             self._attempts,
+            self._chain_goal,
+            self._launched_goal,
         )
 
     def _finish_failed(self) -> None:
@@ -459,7 +625,7 @@ class GoalDirector:
         if self._attempts >= self.max_attempts:
             self._exhausted = True
 
-    def _preempt(self, goal: Goal, facts: Mapping[str, float]) -> None:
+    def _preempt(self, goal: Goal, facts: Mapping[str, float] | None = None) -> None:
         """Преемптить бегущее дерево (fail-safe) через смену корня.
 
         Новый корень — ``Condition`` на неудовлетворённую цель: executor
@@ -474,10 +640,10 @@ class GoalDirector:
         )
         self.loop.tick_actuation(stub, facts)
 
-    def _abandon(self, facts: Mapping[str, float]) -> None:
+    def _abandon(self) -> None:
         """Остановить целевой контур (все исходы достигнуты / нет исходов)."""
         if self._running and self._goal is not None:
-            self._preempt(self._goal, facts)
+            self._preempt(self._goal)
         self._goal = None
         self._tree = None
         self._running = False
@@ -486,3 +652,5 @@ class GoalDirector:
         self._cooldown = 0
         self._elapsed = 0
         self._goal_value = None
+        self._chain_goal = ""
+        self._launched_goal = ""
