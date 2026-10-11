@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -84,6 +85,17 @@ from src.telemetry import TelemetryLogger, TelemetryWriter
 
 _log = logging.getLogger(__name__)
 
+# Любой float-вектор: float32, float64 и т.д. (идиома src/memory/serialize.py).
+# Без параметров «голый» np.ndarray в strict-режиме даёт каскад Unknown.
+Vector = np.ndarray[Any, np.dtype[np.floating[Any]]]
+
+
+@runtime_checkable
+class SupportsClose(Protocol):
+    """Объект с ``close()`` (телеметрия/store закрываются опционально)."""
+
+    def close(self) -> None: ...
+
 
 @dataclass
 class HostLoop:
@@ -137,13 +149,13 @@ class HostLoop:
     actuation_config: ActuationConfig | None = None
     executor: ActuatorExecutor | None = None
     goal_director: GoalDirector | None = None
-    importance: np.ndarray | None = None
+    importance: Vector | None = None
     clock: Callable[[], float] = time.time
     _prev_now: float | None = field(default=None, init=False, repr=False)
     _prev_f: float = field(default=0.0, init=False, repr=False)
     _last_text: str = field(default="", init=False, repr=False)
-    _cached_query: np.ndarray | None = field(default=None, init=False, repr=False)
-    _cached_prior: np.ndarray | None = field(default=None, init=False, repr=False)
+    _cached_query: Vector | None = field(default=None, init=False, repr=False)
+    _cached_prior: Vector | None = field(default=None, init=False, repr=False)
     last_outcome: TickOutcome | None = field(default=None, init=False, repr=False)
     last_drift: bool = field(default=False, init=False, repr=False)
     last_memory_hit: bool = field(default=False, init=False, repr=False)
@@ -245,7 +257,7 @@ class HostLoop:
         self._prev_now = now
         return dt, now
 
-    def _gamma_bus(self, u: np.ndarray) -> np.ndarray:
+    def _gamma_bus(self, u: Vector) -> Vector:
         """Точность γ по каналам шины (без tile по колонкам).
 
         ``variance`` — γ = 1/var по окну (PrecisionEstimator).
@@ -258,10 +270,10 @@ class HostLoop:
             Вектор γ shape=(total_dim,).
         """
         if self.precision_mode == "ones":
-            return np.ones(u.shape[0], dtype=np.float64)
+            return np.ones(int(u.shape[0]), dtype=np.float64)
         return self.estimator.update(u)
 
-    def precision(self, u: np.ndarray) -> np.ndarray:
+    def precision(self, u: Vector) -> Vector:
         """Точность γ для всех каналов.
 
         Args:
@@ -272,7 +284,7 @@ class HostLoop:
         """
         return np.tile(self._gamma_bus(u), self.pipeline.ensemble.n_columns)
 
-    def _update_prior_if_new_text(self, text: str) -> np.ndarray | None:
+    def _update_prior_if_new_text(self, text: str) -> Vector | None:
         """Обновить приор памяти только при новом тексте (event-triggered).
 
         Эмбеддинг и recall — дорогие (сеть, SQLite); текст приходит редко,
@@ -919,11 +931,11 @@ class HostLoop:
     def close(self) -> None:
         """Graceful shutdown: закрыть телеметрию и store (идемпотентно)."""
         writer = self.logger.writer
-        if hasattr(writer, "close"):
+        if isinstance(writer, SupportsClose):
             writer.close()
         if self.memory is not None:
             store = self.memory.store
-            if hasattr(store, "close"):
+            if isinstance(store, SupportsClose):
                 store.close()
 
 
@@ -1033,7 +1045,7 @@ def build_host_loop(
         if spec.rank is not None
     }
     ranks.update(config.channel_ranks)
-    importance: np.ndarray | None = None
+    importance: Vector | None = None
     if ranks:
         importance_segments = bus.segments
         if prior_dim > 0:
