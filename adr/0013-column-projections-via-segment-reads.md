@@ -155,6 +155,36 @@ Medium-High. Семантика маски и legacy-контракт `reads=Non
 требования не сдвигать отпечатки. Эквивалентность sum/mean при равной ширине
 ограничена ранжированием (не всей динамикой аттрактора).
 
+## Проверка на рабочем прогоне (2026-10-11)
+
+Три уровня подтверждены отдельно, чтобы не смешивать механизм и его эффект.
+
+1. **Механизм реализован** — unit-тесты `projection`/`column`/`ensemble`.
+2. **Конфигурация применяется** — у собранного `build_host_loop` с
+   `ColumnParams.reads` `resolved_reads` равен объявленным reads
+   (`test_host_projection_chain.py::TestBuiltHostReads`); при разных reads
+   возмущение сегмента выбирает соответствующего победителя
+   (`TestSelectivity`).
+3. **Различие меняет решение** — на одной последовательности входов
+   (step `delta=1.2` на сегменте `a`, `tick_dt=0.01`, memory off, gate off):
+
+   | Конфигурация | activities | active_task | peak F | policy |
+   |---|---|---|---|---|
+   | reads `a`/`b` | (0.045, 0.0) | `a_only` | 0.583 | **silent** |
+   | legacy (`reads=None`) | (0.045, 0.045) | `c0` | 1.166 | **initiative** |
+
+   Legacy дублирует ошибку возмущённого сегмента на обе колонки (F выше при
+   том же входе) → переходит `initiative_f_threshold=1.0`; reads — нет. Это
+   `TestDecisionImpact::test_reads_vs_legacy_differ_in_decision`.
+
+**Граница:** различие доходит до policy **только через агрегат F**. Оценки
+`evaluate_candidates` не читают `context.task` (`grep task` по
+`src/core/policy/*.py` — только описания полей), поэтому при равных
+F/stress/гомеостазе смена специализации решения не меняет
+(`test_context_task_not_used_by_policy`). Идентичность задачи видна в
+телеметрии, но пока не влияет на выбор действия — это отдельный шаг, если
+понадобится task-условная policy.
+
 ## References
 - [src/core/cmc/SPEC.md](../src/core/cmc/SPEC.md) (column_step, CMCEnsemble)
 - [src/host/SPEC.md](../src/host/SPEC.md) (шина, карта сегментов, TickOutcome)
